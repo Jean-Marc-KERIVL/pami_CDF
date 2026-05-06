@@ -1,0 +1,45 @@
+## Component manifest
+
+version: "1.0"
+
+dependencies:
+  # ESP-IDF
+  esp_driver_gpio: ">=1.0.0"
+  esp_driver_uart: ">=0.1.0"
+  esp_driver_i2c: ">=0.1.0"
+  esp_driver_ledc: ">=0.1.0"
+  esp_timer: ">=1.0.0"
+  freertos: ">=10.0.0"
+
+  # ROS 2 / micro-ROS
+  rcl: ">=1.0.0"
+  rclc: ">=1.0.0"
+  rclc_parameter: ">=1.0.0"
+  micro_ros_espidf_component: ">=1.0.0"
+
+# Description
+description: "PAMI Robot - ROS 2 Control System for ESP32"
+
+documentation: "README.md"
+
+maintainers:
+  - name: "KERVIL jean-marc"
+    email: "kervil.jean-marc@example.com"
+
+categories:
+  - "Robotics"
+  - "ROS 2"
+  - "Motor Control"
+
+# Build configuration
+include_dirs:
+  - "include"
+
+source_dirs:
+  - "src"
+
+idf_version: ">=5.0"
+
+language_versions:
+  c: "c99"
+  cpp: "c++17"
