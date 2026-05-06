@@ -1,0 +1,794 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>PAMI Robot - Visualisation 3D</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body {
+            font-family: 'SF Pro Display', -apple-system, BlinkMacSystemFont, sans-serif;
+            background: linear-gradient(135deg, #0f172a 0%, #1e293b 100%);
+            color: #e2e8f0;
+            overflow: hidden;
+            height: 100vh;
+        }
+        #canvas-container {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+        }
+        .panel {
+            position: absolute;
+            background: rgba(15, 23, 42, 0.85);
+            backdrop-filter: blur(12px);
+            border: 1px solid rgba(148, 163, 184, 0.2);
+            border-radius: 16px;
+            padding: 20px;
+            box-shadow: 0 8px 32px rgba(0, 0, 0, 0.4);
+        }
+        #controls {
+            top: 20px;
+            left: 20px;
+            width: 280px;
+        }
+        #status {
+            top: 20px;
+            right: 20px;
+            width: 280px;
+        }
+        h2 {
+            font-size: 18px;
+            margin-bottom: 16px;
+            color: #38bdf8;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+        .btn-group {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 8px;
+            margin-bottom: 12px;
+        }
+        .btn-group-3 {
+            grid-template-columns: 1fr 1fr 1fr;
+        }
+        .btn-full {
+            grid-column: 1 / -1;
+        }
+        button {
+            padding: 12px 16px;
+            font-size: 13px;
+            font-weight: 600;
+            border: none;
+            border-radius: 10px;
+            cursor: pointer;
+            color: white;
+            transition: all 0.2s ease;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 6px;
+        }
+        button:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 6px 20px rgba(0, 0, 0, 0.3);
+        }
+        button:active {
+            transform: translateY(0);
+        }
+        .btn-move { background: linear-gradient(135deg, #3b82f6, #1e40af); }
+        .btn-turn { background: linear-gradient(135deg, #8b5cf6, #6d28d9); }
+        .btn-uturn { background: linear-gradient(135deg, #ec4899, #be185d); }
+        .btn-arm { background: linear-gradient(135deg, #10b981, #047857); }
+        .btn-pump { background: linear-gradient(135deg, #f59e0b, #b45309); }
+        .btn-reset { background: linear-gradient(135deg, #ef4444, #b91c1c); }
+        .section {
+            margin-top: 16px;
+            padding-top: 16px;
+            border-top: 1px solid rgba(148, 163, 184, 0.15);
+        }
+        .section-label {
+            font-size: 11px;
+            color: #94a3b8;
+            text-transform: uppercase;
+            letter-spacing: 1px;
+            margin-bottom: 8px;
+        }
+        .status-row {
+            display: flex;
+            justify-content: space-between;
+            padding: 8px 0;
+            font-size: 13px;
+            border-bottom: 1px solid rgba(148, 163, 184, 0.1);
+        }
+        .status-row:last-child { border-bottom: none; }
+        .status-label { color: #94a3b8; }
+        .status-value {
+            color: #e2e8f0;
+            font-family: 'SF Mono', Monaco, monospace;
+            font-weight: 600;
+        }
+        .indicator {
+            display: inline-block;
+            width: 8px;
+            height: 8px;
+            border-radius: 50%;
+            margin-right: 6px;
+        }
+        .indicator.on { background: #10b981; box-shadow: 0 0 8px #10b981; }
+        .indicator.off { background: #475569; }
+        #log {
+            position: absolute;
+            bottom: 20px;
+            left: 20px;
+            right: 20px;
+            max-height: 140px;
+            overflow-y: auto;
+            font-family: 'SF Mono', Monaco, monospace;
+            font-size: 11px;
+        }
+        .log-line {
+            padding: 4px 8px;
+            border-radius: 4px;
+            margin-bottom: 2px;
+            opacity: 0.9;
+        }
+        .log-line.info { background: rgba(59, 130, 246, 0.15); color: #93c5fd; }
+        .log-line.action { background: rgba(139, 92, 246, 0.15); color: #c4b5fd; }
+        .log-line.success { background: rgba(16, 185, 129, 0.15); color: #6ee7b7; }
+        h1 {
+            position: absolute;
+            top: 20px;
+            left: 50%;
+            transform: translateX(-50%);
+            font-size: 24px;
+            font-weight: 700;
+            background: linear-gradient(135deg, #38bdf8, #c084fc);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            background-clip: text;
+        }
+    </style>
+</head>
+<body>
+    <div id="canvas-container"></div>
+
+    <h1>🤖 PAMI Robot 3D</h1>
+
+    <div id="controls" class="panel">
+        <h2>🎮 Contrôles</h2>
+
+        <div class="section-label">Mouvement</div>
+        <div class="btn-group btn-group-3">
+            <div></div>
+            <button class="btn-move" onclick="robot.forward()">⬆️ Avant</button>
+            <div></div>
+            <button class="btn-turn" onclick="robot.turnLeft()">⬅️ Gauche</button>
+            <button class="btn-reset" onclick="robot.reset()">🔄 Reset</button>
+            <button class="btn-turn" onclick="robot.turnRight()">➡️ Droite</button>
+        </div>
+
+        <div class="section-label" style="margin-top:12px">Demi-tours</div>
+        <div class="btn-group">
+            <button class="btn-uturn" onclick="robot.uTurnLeft()">↺ Demi-tour G</button>
+            <button class="btn-uturn" onclick="robot.uTurnRight()">↻ Demi-tour D</button>
+        </div>
+
+        <div class="section-label" style="margin-top:12px">Bras Robot</div>
+        <div class="btn-group">
+            <button class="btn-arm" onclick="robot.armUp()">⬆ Bras Haut</button>
+            <button class="btn-arm" onclick="robot.armDown()">⬇ Bras Bas</button>
+        </div>
+
+        <div class="section-label" style="margin-top:12px">Pompe à air</div>
+        <div class="btn-group">
+            <button class="btn-pump" onclick="robot.pumpOn()">💨 Pompe ON</button>
+            <button class="btn-pump" onclick="robot.pumpOff()">💨 Pompe OFF</button>
+        </div>
+    </div>
+
+    <div id="status" class="panel">
+        <h2>📊 État Robot</h2>
+        <div class="status-row">
+            <span class="status-label">Position X</span>
+            <span class="status-value" id="pos-x">0.00 m</span>
+        </div>
+        <div class="status-row">
+            <span class="status-label">Position Y</span>
+            <span class="status-value" id="pos-y">0.00 m</span>
+        </div>
+        <div class="status-row">
+            <span class="status-label">Direction</span>
+            <span class="status-value" id="direction">0°</span>
+        </div>
+        <div class="status-row">
+            <span class="status-label">Bras</span>
+            <span class="status-value" id="arm-state"><span class="indicator off"></span>BAS</span>
+        </div>
+        <div class="status-row">
+            <span class="status-label">Pompe</span>
+            <span class="status-value" id="pump-state"><span class="indicator off"></span>OFF</span>
+        </div>
+
+        <div class="section">
+            <div class="section-label">Test Automatique</div>
+            <button class="btn-move btn-full" onclick="runAutoTest()">▶️ Lancer Test Complet</button>
+        </div>
+    </div>
+
+    <div id="log"></div>
+
+    <script type="importmap">
+    {
+        "imports": {
+            "three": "https://unpkg.com/three@0.160.0/build/three.module.js",
+            "three/addons/": "https://unpkg.com/three@0.160.0/examples/jsm/"
+        }
+    }
+    </script>
+
+    <script type="module">
+        import * as THREE from 'three';
+        import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+
+        // ============= SCENE SETUP =============
+        const scene = new THREE.Scene();
+        scene.background = new THREE.Color(0x0f172a);
+        scene.fog = new THREE.Fog(0x0f172a, 10, 30);
+
+        const camera = new THREE.PerspectiveCamera(
+            50, window.innerWidth / window.innerHeight, 0.1, 100
+        );
+        camera.position.set(5, 5, 5);
+        camera.lookAt(0, 0, 0);
+
+        const renderer = new THREE.WebGLRenderer({ antialias: true });
+        renderer.setSize(window.innerWidth, window.innerHeight);
+        renderer.setPixelRatio(window.devicePixelRatio);
+        renderer.shadowMap.enabled = true;
+        renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+        document.getElementById('canvas-container').appendChild(renderer.domElement);
+
+        const controls = new OrbitControls(camera, renderer.domElement);
+        controls.enableDamping = true;
+        controls.dampingFactor = 0.08;
+        controls.target.set(0, 0.5, 0);
+
+        // ============= LIGHTS =============
+        const ambient = new THREE.AmbientLight(0xffffff, 0.4);
+        scene.add(ambient);
+
+        const dirLight = new THREE.DirectionalLight(0xffffff, 1.2);
+        dirLight.position.set(8, 10, 5);
+        dirLight.castShadow = true;
+        dirLight.shadow.mapSize.set(2048, 2048);
+        dirLight.shadow.camera.left = -10;
+        dirLight.shadow.camera.right = 10;
+        dirLight.shadow.camera.top = 10;
+        dirLight.shadow.camera.bottom = -10;
+        scene.add(dirLight);
+
+        const accentLight = new THREE.PointLight(0x38bdf8, 0.6, 10);
+        accentLight.position.set(-3, 3, -3);
+        scene.add(accentLight);
+
+        // ============= GROUND =============
+        const groundGeo = new THREE.PlaneGeometry(40, 40);
+        const groundMat = new THREE.MeshStandardMaterial({
+            color: 0x1e293b,
+            roughness: 0.85,
+            metalness: 0.1
+        });
+        const ground = new THREE.Mesh(groundGeo, groundMat);
+        ground.rotation.x = -Math.PI / 2;
+        ground.receiveShadow = true;
+        scene.add(ground);
+
+        // Grid
+        const grid = new THREE.GridHelper(40, 40, 0x334155, 0x1e293b);
+        grid.position.y = 0.01;
+        scene.add(grid);
+
+        // Trail (path the robot has taken)
+        const trailMaterial = new THREE.LineBasicMaterial({ color: 0x38bdf8, linewidth: 2 });
+        let trailPoints = [new THREE.Vector3(0, 0.05, 0)];
+        let trailGeometry = new THREE.BufferGeometry().setFromPoints(trailPoints);
+        let trailLine = new THREE.Line(trailGeometry, trailMaterial);
+        scene.add(trailLine);
+
+        // ============= ROBOT =============
+        function createRobot() {
+            const robot = new THREE.Group();
+
+            // Châssis principal (corps du robot)
+            const bodyGeo = new THREE.BoxGeometry(0.8, 0.4, 1);
+            const bodyMat = new THREE.MeshStandardMaterial({
+                color: 0x3b82f6,
+                metalness: 0.5,
+                roughness: 0.4
+            });
+            const body = new THREE.Mesh(bodyGeo, bodyMat);
+            body.position.y = 0.35;
+            body.castShadow = true;
+            robot.add(body);
+
+            // Plaque supérieure
+            const topGeo = new THREE.BoxGeometry(0.7, 0.05, 0.9);
+            const topMat = new THREE.MeshStandardMaterial({
+                color: 0x1e293b,
+                metalness: 0.8,
+                roughness: 0.2
+            });
+            const top = new THREE.Mesh(topGeo, topMat);
+            top.position.y = 0.58;
+            top.castShadow = true;
+            robot.add(top);
+
+            // Roues (4 roues)
+            const wheelGeo = new THREE.CylinderGeometry(0.18, 0.18, 0.1, 24);
+            const wheelMat = new THREE.MeshStandardMaterial({
+                color: 0x111827,
+                roughness: 0.7,
+                metalness: 0.3
+            });
+
+            const wheelPositions = [
+                [-0.45, 0.18, 0.35],   // FL
+                [0.45, 0.18, 0.35],    // FR
+                [-0.45, 0.18, -0.35],  // BL
+                [0.45, 0.18, -0.35],   // BR
+            ];
+            const wheels = [];
+            wheelPositions.forEach(pos => {
+                const wheel = new THREE.Mesh(wheelGeo, wheelMat);
+                wheel.rotation.z = Math.PI / 2;
+                wheel.position.set(...pos);
+                wheel.castShadow = true;
+                robot.add(wheel);
+                wheels.push(wheel);
+            });
+
+            // Indicateur de direction (cône avant - "nez")
+            const noseGeo = new THREE.ConeGeometry(0.1, 0.25, 4);
+            const noseMat = new THREE.MeshStandardMaterial({
+                color: 0xfbbf24,
+                emissive: 0xfbbf24,
+                emissiveIntensity: 0.3
+            });
+            const nose = new THREE.Mesh(noseGeo, noseMat);
+            nose.rotation.x = Math.PI / 2;
+            nose.position.set(0, 0.45, 0.6);
+            nose.castShadow = true;
+            robot.add(nose);
+
+            // BRAS ROBOT
+            const armGroup = new THREE.Group();
+            armGroup.position.set(0, 0.6, 0.2);
+
+            // Base du bras
+            const armBaseGeo = new THREE.CylinderGeometry(0.08, 0.1, 0.1, 16);
+            const armBaseMat = new THREE.MeshStandardMaterial({
+                color: 0x64748b,
+                metalness: 0.7,
+                roughness: 0.3
+            });
+            const armBase = new THREE.Mesh(armBaseGeo, armBaseMat);
+            armBase.position.y = 0.05;
+            armBase.castShadow = true;
+            armGroup.add(armBase);
+
+            // Articulation 1 (épaule)
+            const shoulderGeo = new THREE.SphereGeometry(0.06, 16, 16);
+            const shoulderMat = new THREE.MeshStandardMaterial({
+                color: 0x10b981,
+                metalness: 0.6,
+                roughness: 0.4
+            });
+            const shoulder = new THREE.Mesh(shoulderGeo, shoulderMat);
+            shoulder.position.y = 0.1;
+            armGroup.add(shoulder);
+
+            // Bras articulé
+            const armPivot = new THREE.Group();
+            armPivot.position.y = 0.1;
+            armGroup.add(armPivot);
+
+            const armSegment1Geo = new THREE.BoxGeometry(0.08, 0.4, 0.08);
+            const armSegmentMat = new THREE.MeshStandardMaterial({
+                color: 0xe2e8f0,
+                metalness: 0.6,
+                roughness: 0.3
+            });
+            const armSegment1 = new THREE.Mesh(armSegment1Geo, armSegmentMat);
+            armSegment1.position.y = 0.2;
+            armSegment1.castShadow = true;
+            armPivot.add(armSegment1);
+
+            // Pince/Effecteur final
+            const gripperGeo = new THREE.BoxGeometry(0.15, 0.06, 0.1);
+            const gripperMat = new THREE.MeshStandardMaterial({
+                color: 0xef4444,
+                metalness: 0.4,
+                roughness: 0.5
+            });
+            const gripper = new THREE.Mesh(gripperGeo, gripperMat);
+            gripper.position.y = 0.42;
+            armPivot.add(gripper);
+
+            robot.add(armGroup);
+
+            // LEDs (3 strips)
+            const ledMat1 = new THREE.MeshStandardMaterial({
+                color: 0x38bdf8,
+                emissive: 0x38bdf8,
+                emissiveIntensity: 0.8
+            });
+            const ledGeo = new THREE.BoxGeometry(0.6, 0.04, 0.04);
+
+            const led1 = new THREE.Mesh(ledGeo, ledMat1.clone());
+            led1.position.set(0, 0.62, 0.45);
+            robot.add(led1);
+
+            const led2 = new THREE.Mesh(ledGeo, ledMat1.clone());
+            led2.material.color.setHex(0x10b981);
+            led2.material.emissive.setHex(0x10b981);
+            led2.position.set(0, 0.62, -0.45);
+            robot.add(led2);
+
+            const led3 = new THREE.Mesh(
+                new THREE.BoxGeometry(0.04, 0.04, 0.7),
+                ledMat1.clone()
+            );
+            led3.material.color.setHex(0xec4899);
+            led3.material.emissive.setHex(0xec4899);
+            led3.position.set(0.42, 0.62, 0);
+            robot.add(led3);
+
+            // Pompe à air (cylindre sur le dessus)
+            const pumpGeo = new THREE.CylinderGeometry(0.06, 0.08, 0.15, 16);
+            const pumpMat = new THREE.MeshStandardMaterial({
+                color: 0xf59e0b,
+                metalness: 0.6,
+                roughness: 0.3
+            });
+            const pump = new THREE.Mesh(pumpGeo, pumpMat);
+            pump.position.set(-0.25, 0.68, -0.3);
+            pump.castShadow = true;
+            robot.add(pump);
+
+            return {
+                group: robot,
+                wheels,
+                armPivot,
+                gripper,
+                leds: [led1, led2, led3],
+                pump,
+                nose
+            };
+        }
+
+        const robotMesh = createRobot();
+        scene.add(robotMesh.group);
+
+        // Marqueur d'origine
+        const originGeo = new THREE.RingGeometry(0.2, 0.25, 32);
+        const originMat = new THREE.MeshBasicMaterial({
+            color: 0xfbbf24,
+            side: THREE.DoubleSide
+        });
+        const origin = new THREE.Mesh(originGeo, originMat);
+        origin.rotation.x = -Math.PI / 2;
+        origin.position.y = 0.02;
+        scene.add(origin);
+
+        // ============= ROBOT STATE & LOGIC =============
+        const robotState = {
+            x: 0,
+            y: 0,
+            direction: 0,        // degrees, 0 = +Z (forward)
+            armUp: false,
+            pumpOn: false,
+            isAnimating: false,
+
+            // Targets for smooth animation
+            targetX: 0,
+            targetZ: 0,
+            targetRotation: 0,
+            targetArmAngle: -Math.PI / 2,    // start arm DOWN (horizontal)
+
+            currentRotation: 0,
+            currentArmAngle: -Math.PI / 2,
+        };
+
+        function logMessage(message, type = 'info') {
+            const log = document.getElementById('log');
+            const line = document.createElement('div');
+            line.className = `log-line ${type}`;
+            const time = new Date().toLocaleTimeString();
+            line.textContent = `[${time}] ${message}`;
+            log.insertBefore(line, log.firstChild);
+            while (log.children.length > 10) log.removeChild(log.lastChild);
+        }
+
+        function updateStatus() {
+            document.getElementById('pos-x').textContent = robotState.x.toFixed(2) + ' m';
+            document.getElementById('pos-y').textContent = robotState.y.toFixed(2) + ' m';
+            document.getElementById('direction').textContent = Math.round(robotState.direction) % 360 + '°';
+
+            const armEl = document.getElementById('arm-state');
+            armEl.innerHTML = robotState.armUp
+                ? '<span class="indicator on"></span>HAUT'
+                : '<span class="indicator off"></span>BAS';
+
+            const pumpEl = document.getElementById('pump-state');
+            pumpEl.innerHTML = robotState.pumpOn
+                ? '<span class="indicator on"></span>ON'
+                : '<span class="indicator off"></span>OFF';
+        }
+
+        function addTrailPoint() {
+            trailPoints.push(new THREE.Vector3(robotState.x, 0.05, robotState.y));
+            if (trailPoints.length > 200) trailPoints.shift();
+            trailLine.geometry.dispose();
+            trailLine.geometry = new THREE.BufferGeometry().setFromPoints(trailPoints);
+        }
+
+        // ============= PUBLIC API =============
+        window.robot = {
+            forward(distance = 0.5) {
+                if (robotState.isAnimating) return;
+                const rad = (robotState.direction * Math.PI) / 180;
+                robotState.targetX = robotState.x + Math.sin(rad) * distance;
+                robotState.targetZ = robotState.y + Math.cos(rad) * distance;
+                robotState.isAnimating = true;
+                logMessage(`▶️ Avancer ${distance}m`, 'action');
+            },
+            turnRight(angle = 90) {
+                if (robotState.isAnimating) return;
+                robotState.direction = (robotState.direction - angle + 360) % 360;
+                robotState.targetRotation = robotState.currentRotation - (angle * Math.PI / 180);
+                robotState.isAnimating = true;
+                logMessage(`➡️ Tourner droite ${angle}°`, 'action');
+            },
+            turnLeft(angle = 90) {
+                if (robotState.isAnimating) return;
+                robotState.direction = (robotState.direction + angle) % 360;
+                robotState.targetRotation = robotState.currentRotation + (angle * Math.PI / 180);
+                robotState.isAnimating = true;
+                logMessage(`⬅️ Tourner gauche ${angle}°`, 'action');
+            },
+            uTurnRight() {
+                if (robotState.isAnimating) return;
+                robotState.direction = (robotState.direction - 180 + 360) % 360;
+                robotState.targetRotation = robotState.currentRotation - Math.PI;
+                robotState.isAnimating = true;
+                logMessage(`↻ Demi-tour DROITE (180°)`, 'action');
+            },
+            uTurnLeft() {
+                if (robotState.isAnimating) return;
+                robotState.direction = (robotState.direction + 180) % 360;
+                robotState.targetRotation = robotState.currentRotation + Math.PI;
+                robotState.isAnimating = true;
+                logMessage(`↺ Demi-tour GAUCHE (180°)`, 'action');
+            },
+            armUp() {
+                if (robotState.armUp) {
+                    logMessage('⚠️ Bras déjà en haut', 'info');
+                    return;
+                }
+                robotState.armUp = true;
+                robotState.targetArmAngle = 0;
+                logMessage('⬆️ Bras HAUT', 'success');
+                updateStatus();
+            },
+            armDown() {
+                if (!robotState.armUp) {
+                    logMessage('⚠️ Bras déjà en bas', 'info');
+                    return;
+                }
+                robotState.armUp = false;
+                robotState.targetArmAngle = -Math.PI / 2;
+                logMessage('⬇️ Bras BAS', 'success');
+                updateStatus();
+            },
+            pumpOn() {
+                robotState.pumpOn = true;
+                robotState.pumpPulse = 0;
+                logMessage('💨 Pompe ACTIVÉE', 'success');
+                updateStatus();
+            },
+            pumpOff() {
+                robotState.pumpOn = false;
+                logMessage('💨 Pompe DÉSACTIVÉE', 'info');
+                updateStatus();
+            },
+            reset() {
+                robotState.x = 0;
+                robotState.y = 0;
+                robotState.direction = 0;
+                robotState.targetX = 0;
+                robotState.targetZ = 0;
+                robotState.targetRotation = 0;
+                robotState.currentRotation = 0;
+                robotState.currentArmAngle = -Math.PI / 2;
+                robotState.armUp = false;
+                robotState.targetArmAngle = -Math.PI / 2;
+                robotState.pumpOn = false;
+                robotState.isAnimating = false;
+                robotMesh.group.position.set(0, 0, 0);
+                robotMesh.group.rotation.y = 0;
+                robotMesh.armPivot.rotation.x = 0;
+                trailPoints = [new THREE.Vector3(0, 0.05, 0)];
+                trailLine.geometry.dispose();
+                trailLine.geometry = new THREE.BufferGeometry().setFromPoints(trailPoints);
+                logMessage('🔄 Reset complet', 'info');
+                updateStatus();
+            },
+        };
+
+        // ============= AUTO TEST =============
+        window.runAutoTest = async function() {
+            logMessage('▶️ Lancement test automatique', 'success');
+            const wait = (ms) => new Promise(r => setTimeout(r, ms));
+            const waitForAnim = async () => {
+                while (robotState.isAnimating) await wait(50);
+                await wait(200);
+            };
+
+            robot.reset();
+            await wait(500);
+
+            // 1. Avant
+            robot.forward(1);
+            await waitForAnim();
+
+            // 2. Droite
+            robot.turnRight(90);
+            await waitForAnim();
+            robot.forward(0.8);
+            await waitForAnim();
+
+            // 3. Gauche
+            robot.turnLeft(90);
+            await waitForAnim();
+            robot.forward(0.5);
+            await waitForAnim();
+
+            // 4. Bras haut
+            robot.armUp();
+            await wait(800);
+
+            // 5. Pompe ON
+            robot.pumpOn();
+            await wait(800);
+
+            // 6. Demi-tour droite
+            robot.uTurnRight();
+            await waitForAnim();
+            robot.forward(0.8);
+            await waitForAnim();
+
+            // 7. Pompe OFF
+            robot.pumpOff();
+            await wait(500);
+
+            // 8. Bras bas
+            robot.armDown();
+            await wait(800);
+
+            // 9. Demi-tour gauche
+            robot.uTurnLeft();
+            await waitForAnim();
+            robot.forward(1);
+            await waitForAnim();
+
+            logMessage('✅ Test automatique terminé!', 'success');
+        };
+
+        // ============= ANIMATION LOOP =============
+        const clock = new THREE.Clock();
+
+        function animate() {
+            requestAnimationFrame(animate);
+            const dt = clock.getDelta();
+
+            // Smooth movement
+            const moveSpeed = 2.5;
+            const rotSpeed = 4.0;
+            const armSpeed = 4.0;
+
+            const dx = robotState.targetX - robotState.x;
+            const dz = robotState.targetZ - robotState.y;
+            const distSq = dx * dx + dz * dz;
+
+            const dRot = robotState.targetRotation - robotState.currentRotation;
+            const dArm = robotState.targetArmAngle - robotState.currentArmAngle;
+
+            let stillMoving = false;
+
+            if (distSq > 0.0001) {
+                const step = Math.min(moveSpeed * dt, Math.sqrt(distSq));
+                const angle = Math.atan2(dx, dz);
+                robotState.x += Math.sin(angle) * step;
+                robotState.y += Math.cos(angle) * step;
+                addTrailPoint();
+                stillMoving = true;
+
+                // Rotation des roues pendant le mouvement
+                robotMesh.wheels.forEach(w => {
+                    w.rotation.x += step * 4;
+                });
+            }
+
+            if (Math.abs(dRot) > 0.005) {
+                const step = Math.sign(dRot) * Math.min(Math.abs(dRot), rotSpeed * dt);
+                robotState.currentRotation += step;
+                stillMoving = true;
+            } else {
+                robotState.currentRotation = robotState.targetRotation;
+            }
+
+            if (Math.abs(dArm) > 0.005) {
+                const step = Math.sign(dArm) * Math.min(Math.abs(dArm), armSpeed * dt);
+                robotState.currentArmAngle += step;
+            } else {
+                robotState.currentArmAngle = robotState.targetArmAngle;
+            }
+
+            if (!stillMoving && distSq <= 0.0001) {
+                robotState.x = robotState.targetX;
+                robotState.y = robotState.targetZ;
+                robotState.isAnimating = false;
+            }
+
+            // Apply transforms
+            robotMesh.group.position.x = robotState.x;
+            robotMesh.group.position.z = robotState.y;
+            robotMesh.group.rotation.y = robotState.currentRotation;
+            robotMesh.armPivot.rotation.x = robotState.currentArmAngle;
+
+            // Pump animation (vibration when on)
+            if (robotState.pumpOn) {
+                robotState.pumpPulse = (robotState.pumpPulse || 0) + dt * 12;
+                robotMesh.pump.scale.y = 1 + Math.sin(robotState.pumpPulse) * 0.08;
+                robotMesh.pump.material.emissive.setHex(0xf59e0b);
+                robotMesh.pump.material.emissiveIntensity = 0.4 + Math.sin(robotState.pumpPulse) * 0.3;
+            } else {
+                robotMesh.pump.scale.y = 1;
+                robotMesh.pump.material.emissiveIntensity = 0;
+            }
+
+            // LED breathing
+            const breathe = 0.5 + Math.sin(clock.getElapsedTime() * 2) * 0.4;
+            robotMesh.leds.forEach(led => {
+                led.material.emissiveIntensity = breathe;
+            });
+
+            updateStatus();
+            controls.update();
+            renderer.render(scene, camera);
+        }
+
+        // ============= RESIZE =============
+        window.addEventListener('resize', () => {
+            camera.aspect = window.innerWidth / window.innerHeight;
+            camera.updateProjectionMatrix();
+            renderer.setSize(window.innerWidth, window.innerHeight);
+        });
+
+        // ============= START =============
+        animate();
+        updateStatus();
+        logMessage('🤖 PAMI Robot 3D initialisé', 'success');
+        logMessage('💡 Cliquez sur les boutons pour contrôler le robot', 'info');
+
+        // Expose for testing
+        window.__robotState = robotState;
+        window.__robotMesh = robotMesh;
+    </script>
+</body>
+</html>
