@@ -1,0 +1,21 @@
+{
+  "name": "pami-robot",
+  "version": "1.0.0",
+  "description": "Système de contrôle pour robot PAMI avec mouvements et bras",
+  "main": "robot.js",
+  "bin": {
+    "pami": "index.js"
+  },
+  "scripts": {
+    "start": "node index.js",
+    "test": "node index.js"
+  },
+  "keywords": [
+    "robot",
+    "pami",
+    "control",
+    "movement"
+  ],
+  "author": "KERVIL jean-marc",
+  "license": "MIT"
+}
