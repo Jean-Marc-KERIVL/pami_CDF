@@ -1,137 +1,101 @@
-/*
- * PAMI Robot - Avancer avec vitesse adaptative
- * --------------------------------------------
- * Hardware:
- *   - ESP32
- *   - Module MJKDZ (L298N dual H-bridge)
- *   - 2 moteurs DC
- *   - Capteur ultrasons HC-SR04
- *
- * Câblage moteurs (via MJKDZ):
- *   DROIT:  IN1=D19, IN2=D21
- *   GAUCHE: IN1=D18, IN2=TX (GPIO1)   [inversé en logiciel]
- *
- * Câblage capteur:
- *   TRIG = D27
- *   ECHO = D14   ⚠️ HC-SR04 sort 5V — idéalement diviseur 1k/2k vers ECHO
- *   VCC  = 5V, GND = GND
- *
- * Comportement:
- *   - distance > 60 cm : pleine vitesse
- *   - 15 → 60 cm       : vitesse proportionnelle (plus c'est près, plus c'est lent)
- *   - distance < 15 cm : ARRÊT
- *   - Mesure régulière, asservissement temps réel
- */
+// ============================================================
+//  PAMI Robot — Forward avec vitesse adaptative HC-SR04
+//  Architecture C++ : Motor / Drivetrain / UltrasonicSensor
+// ============================================================
+//
+//  Câblage (voir Pins.h):
+//    Moteur DROIT  : IN1=D19, IN2=D21
+//    Moteur GAUCHE : IN1=D18, IN2=D23   ⚠️ ex-TX, à déplacer si pas déjà fait
+//    Ultrasons     : TRIG=D27, ECHO=D14
+//    LED interne   : D2
+//
+//  Comportement:
+//    - >60 cm : pleine vitesse
+//    - 15..60 cm : vitesse proportionnelle (linéaire)
+//    - <15 cm : STOP
+//    - Log temps réel sur Serial USB (115200 baud)
 
-// =================== CONFIG PINS ===================
-const int RIGHT_IN1 = 19;
-const int RIGHT_IN2 = 21;
-const int LEFT_IN1  = 18;
-const int LEFT_IN2  = 1;     // TX (GPIO1)
+#include "Pins.h"
+#include "Motor.h"
+#include "Drivetrain.h"
+#include "UltrasonicSensor.h"
 
-const int TRIG_PIN  = 27;
-const int ECHO_PIN  = 14;
+// =========== Instances globales ===========
+// Moteur gauche déclaré "inverted" car monté en miroir physiquement
+Motor motorLeft (Pins::LEFT_IN1,  Pins::LEFT_IN2,  /*inverted=*/true);
+Motor motorRight(Pins::RIGHT_IN1, Pins::RIGHT_IN2, /*inverted=*/false);
+Drivetrain drivetrain(motorLeft, motorRight);
 
-const int LED_PIN   = 2;     // LED interne ESP32
+UltrasonicSensor sonar(Pins::US_TRIG, Pins::US_ECHO, Config::ECHO_TIMEOUT_US);
 
-// =================== PARAMÈTRES ===================
-const int PWM_FREQ        = 1000;   // 1 kHz (bon pour L298N)
-const int PWM_RES         = 8;      // 8 bits (0-255)
-
-const int DIST_STOP_CM    = 15;     // < 15 cm -> stop
-const int DIST_FULL_CM    = 60;     // > 60 cm -> pleine vitesse
-const int SPEED_MIN       = 90;     // vitesse mini pour démarrer le moteur
-const int SPEED_MAX       = 255;    // vitesse max
-
-const unsigned long STARTUP_DELAY_MS = 2000;
-const unsigned long LOOP_PERIOD_MS   = 50;   // mesure 20 fois/sec
-const unsigned long ECHO_TIMEOUT_US  = 25000; // ~4 m max
-
-// =================== HELPERS PWM ===================
-void motorWrite(int in1, int in2, int duty_in1, int duty_in2) {
-  ledcWrite(in1, duty_in1);
-  ledcWrite(in2, duty_in2);
+// =========== Logique ===========
+static int distanceToSpeed(long dist_cm) {
+    if (dist_cm < 0)                       return Config::SPEED_MAX;   // rien -> plein
+    if (dist_cm <  Config::DIST_STOP_CM)   return 0;                   // proche -> stop
+    if (dist_cm >= Config::DIST_FULL_CM)   return Config::SPEED_MAX;   // loin -> plein
+    long s = map(dist_cm,
+                 Config::DIST_STOP_CM, Config::DIST_FULL_CM,
+                 Config::SPEED_MIN,    Config::SPEED_MAX);
+    return constrain((int)s, Config::SPEED_MIN, Config::SPEED_MAX);
 }
 
-void forwardSpeed(int speed) {
-  // Moteur DROIT: avance = IN1 PWM, IN2 = 0
-  motorWrite(RIGHT_IN1, RIGHT_IN2, speed, 0);
-  // Moteur GAUCHE (inversé): avance = IN1 = 0, IN2 PWM
-  motorWrite(LEFT_IN1, LEFT_IN2, 0, speed);
+static void printStatus(long dist, int speed) {
+    int bars = map(speed, 0, 255, 0, 20);
+    char bar[22] = {0};
+    for (int i = 0; i < 20; ++i) bar[i] = (i < bars) ? '#' : '-';
+    if (dist < 0) {
+        Serial.printf("dist=---  cm | speed=%3d/255 [%s] | %s\n",
+                      speed, bar, speed == 0 ? "STOP" : "AVANCE");
+    } else {
+        Serial.printf("dist=%3ld cm | speed=%3d/255 [%s] | %s\n",
+                      dist, speed, bar, speed == 0 ? "STOP" : "AVANCE");
+    }
 }
 
-void stopAll() {
-  motorWrite(RIGHT_IN1, RIGHT_IN2, 0, 0);
-  motorWrite(LEFT_IN1,  LEFT_IN2,  0, 0);
-}
-
-// =================== ULTRASONS ===================
-// Retourne la distance en cm. -1 si pas d'écho (rien dans la portée).
-long readDistanceCm() {
-  digitalWrite(TRIG_PIN, LOW);
-  delayMicroseconds(3);
-  digitalWrite(TRIG_PIN, HIGH);
-  delayMicroseconds(10);
-  digitalWrite(TRIG_PIN, LOW);
-
-  unsigned long duration = pulseIn(ECHO_PIN, HIGH, ECHO_TIMEOUT_US);
-  if (duration == 0) return -1;
-  // Vitesse du son ≈ 343 m/s ⇒ 0.0343 cm/µs, aller-retour donc /2
-  return (long)(duration * 0.0343f / 2.0f);
-}
-
-// Convertit la distance en consigne de vitesse 0..255
-int distanceToSpeed(long dist_cm) {
-  if (dist_cm < 0)              return SPEED_MAX;   // rien détecté → plein
-  if (dist_cm < DIST_STOP_CM)   return 0;           // trop près → stop
-  if (dist_cm >= DIST_FULL_CM)  return SPEED_MAX;   // loin → plein
-
-  // Interpolation linéaire entre DIST_STOP (-> SPEED_MIN) et DIST_FULL (-> SPEED_MAX)
-  long s = map(dist_cm, DIST_STOP_CM, DIST_FULL_CM, SPEED_MIN, SPEED_MAX);
-  if (s < SPEED_MIN) s = SPEED_MIN;
-  if (s > SPEED_MAX) s = SPEED_MAX;
-  return (int)s;
-}
-
-// =================== SETUP ===================
+// =========== Arduino setup ===========
 void setup() {
-  // Pins capteur
-  pinMode(TRIG_PIN, OUTPUT);
-  pinMode(ECHO_PIN, INPUT);
-  digitalWrite(TRIG_PIN, LOW);
+    Serial.begin(Config::SERIAL_BAUD);
+    delay(200);
+    Serial.println();
+    Serial.println("==================================");
+    Serial.println(" PAMI Robot - Forward + HC-SR04   ");
+    Serial.println(" Motors: R(D19/D21)  L(D18/D23)   ");
+    Serial.println(" Sonar : TRIG=D27 ECHO=D14        ");
+    Serial.println("==================================");
 
-  // LED interne
-  pinMode(LED_PIN, OUTPUT);
-  digitalWrite(LED_PIN, HIGH);
+    pinMode(Pins::LED, OUTPUT);
+    digitalWrite(Pins::LED, HIGH);
 
-  // PWM sur les 4 pins moteur (ESP32 Arduino core v3+)
-  ledcAttach(RIGHT_IN1, PWM_FREQ, PWM_RES);
-  ledcAttach(RIGHT_IN2, PWM_FREQ, PWM_RES);
-  ledcAttach(LEFT_IN1,  PWM_FREQ, PWM_RES);
-  ledcAttach(LEFT_IN2,  PWM_FREQ, PWM_RES);
+    drivetrain.begin();
+    sonar.begin();
 
-  // Sécurité: tout à 0
-  stopAll();
-
-  // Délai sécurité au démarrage (LED fixe)
-  delay(STARTUP_DELAY_MS);
-  digitalWrite(LED_PIN, LOW);
+    Serial.printf("Démarrage dans %lu ms...\n", Config::STARTUP_DELAY_MS);
+    delay(Config::STARTUP_DELAY_MS);
+    digitalWrite(Pins::LED, LOW);
+    Serial.println("GO!");
 }
 
-// =================== LOOP ===================
+// =========== Arduino loop ===========
 void loop() {
-  long dist = readDistanceCm();
-  int speed = distanceToSpeed(dist);
+    static unsigned long t_last_print = 0;
 
-  if (speed == 0) {
-    stopAll();
-    // LED clignote rapidement = obstacle proche
-    digitalWrite(LED_PIN, (millis() / 100) % 2);
-  } else {
-    forwardSpeed(speed);
-    // LED proportionnelle: allumée fixe = pleine vitesse
-    digitalWrite(LED_PIN, speed >= SPEED_MAX ? HIGH : ((millis() / (300 - speed)) % 2));
-  }
+    long dist  = sonar.readCm();
+    int  speed = distanceToSpeed(dist);
 
-  delay(LOOP_PERIOD_MS);
+    if (speed == 0) {
+        drivetrain.stop();
+        digitalWrite(Pins::LED, (millis() / 100) % 2);
+    } else {
+        drivetrain.drive(speed);
+        digitalWrite(Pins::LED, speed >= Config::SPEED_MAX
+                                 ? HIGH
+                                 : (millis() / (300 - speed)) % 2);
+    }
+
+    if (millis() - t_last_print >= Config::PRINT_PERIOD_MS) {
+        t_last_print = millis();
+        printStatus(dist, speed);
+    }
+
+    delay(Config::LOOP_PERIOD_MS);
 }
