@@ -37,10 +37,8 @@ namespace Config {
     constexpr unsigned long ECHO_TIMEOUT_US = 25000UL;  // ~4 m max
 
     // Comportement
-    constexpr int  DIST_STOP_CM      = 15;     // distance d'arrêt
-    constexpr int  DIST_FULL_CM      = 60;     // distance pleine vitesse
-    constexpr int  SPEED_MIN         = 90;     // PWM min pour démarrer le moteur
-    constexpr int  SPEED_MAX         = 255;    // PWM max
+    constexpr int  DIST_STOP_CM      = 20;     // distance d'arrêt (obstacle détecté)
+    constexpr int  SPEED_CRUISE      = 220;    // vitesse de croisière (PWM 0..255)
 
     // Timings
     constexpr unsigned long STARTUP_DELAY_MS = 2000;
