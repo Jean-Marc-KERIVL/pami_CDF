@@ -10,11 +10,11 @@
 //    Servo SG90    : D26
 //    LED interne   : D2
 //
-//  Séquence (au boot, sans starter):
+//  Séquence (au boot):
 //    1. Délai 1 s (sécurité)
-//    2. Les 2 moteurs avancent ensemble pendant 2 s
-//    3. Stop des moteurs
-//    4. Le servo SG90 oscille 0° <-> 180° toutes les 500 ms
+//    2. Les 2 moteurs avancent ensemble pendant 5 s
+//    3. Stop définitif des moteurs (jusqu'à coupure d'alim)
+//    4. Le servo SG90 oscille 0° <-> 90° en boucle (jusqu'à coupure d'alim)
 
 #include "Pins.h"
 #include "Motor.h"
@@ -46,10 +46,10 @@ void setup() {
     // Délai de sécurité avant départ
     delay(1000);
 
-    // === ÉTAPE 1 : les 2 moteurs avancent 2 s ===
+    // === ÉTAPE 1 : les 2 moteurs avancent 5 s ===
     digitalWrite(Pins::LED, HIGH);
     drivetrain.drive(Config::SPEED_CRUISE);
-    delay(2000);
+    delay(5000);
     drivetrain.stop();
     digitalWrite(Pins::LED, LOW);
 
