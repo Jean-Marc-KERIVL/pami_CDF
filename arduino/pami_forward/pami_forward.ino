@@ -181,23 +181,29 @@ void setup() {
 }
 
 // =========== loop ===========
-// Servo : incréments relatifs +180 puis -180 (course complète),
-// un peu plus rapide entre chaque tick.
-//   step=1 toutes les 40 ms -> ~7.2 s par mouvement de 180°
+// Servo : incréments relatifs +TICKS puis -TICKS, lentement.
+// step=1 toutes les 70 ms (doux, peu d'appel de courant).
+// TICKS = 220 -> au-delà des 180° physiques, le servo reste en butée
+// quelques pas (effet "pause" + retour plus lent à l'autre extrémité).
+constexpr int   SERVO_TICKS      = 220;
+constexpr int   SERVO_STEP       = 1;
+constexpr int   SERVO_STEP_DELAY = 70;     // ms entre 2 ticks
+constexpr int   SERVO_PAUSE_MS   = 400;
+
 void loop() {
-    static int current_angle = 0;            // position interne (arbitraire au boot)
+    static int current_angle = 0;            // arbitraire au démarrage
 
-    // === +180 ticks (vers le haut) ===
+    // === +TICKS (vers le haut) ===
     digitalWrite(Pins::LED, HIGH);
-    int target = constrain(current_angle + 180, 0, 180);
-    sweep(current_angle, target, /*step=*/1, /*step_delay=*/40);
+    int target = constrain(current_angle + SERVO_TICKS, 0, 180);
+    sweep(current_angle, target, SERVO_STEP, SERVO_STEP_DELAY);
     current_angle = target;
-    delay(500);
+    delay(SERVO_PAUSE_MS);
 
-    // === -180 ticks (vers le bas) ===
+    // === -TICKS (vers le bas) ===
     digitalWrite(Pins::LED, LOW);
-    target = constrain(current_angle - 180, 0, 180);
-    sweep(current_angle, target, /*step=*/1, /*step_delay=*/40);
+    target = constrain(current_angle - SERVO_TICKS, 0, 180);
+    sweep(current_angle, target, SERVO_STEP, SERVO_STEP_DELAY);
     current_angle = target;
-    delay(500);
+    delay(SERVO_PAUSE_MS);
 }

@@ -17,8 +17,8 @@ Servo::Servo(int pin, int pulse_min_us, int pulse_max_us)
 
 void Servo::begin() {
     ledcAttach(_pin, SERVO_FREQ_HZ, SERVO_RES_BITS);
-    // Position initiale : milieu (90°)
-    setAngle(90);
+    // Pas de position initiale forcée : le servo reste où il est physiquement.
+    // _last_angle = -1, donc le premier setAngle réel sera bien envoyé.
 }
 
 void Servo::setAngle(int angle_deg) {
