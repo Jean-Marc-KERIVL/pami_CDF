@@ -181,23 +181,23 @@ void setup() {
 }
 
 // =========== loop ===========
-// Servo : incréments relatifs +90 puis -90, très doucement pour
-// limiter les appels de courant.
-//   step=1 toutes les 70 ms -> ~6.3 s par mouvement de 90°
+// Servo : incréments relatifs +180 puis -180 (course complète),
+// un peu plus rapide entre chaque tick.
+//   step=1 toutes les 40 ms -> ~7.2 s par mouvement de 180°
 void loop() {
-    static int current_angle = 90;          // position interne (arbitraire au boot)
+    static int current_angle = 0;            // position interne (arbitraire au boot)
 
-    // === +90 ticks ===
+    // === +180 ticks (vers le haut) ===
     digitalWrite(Pins::LED, HIGH);
-    int target = constrain(current_angle + 90, 0, 180);
-    sweep(current_angle, target, /*step=*/1, /*step_delay=*/70);
+    int target = constrain(current_angle + 180, 0, 180);
+    sweep(current_angle, target, /*step=*/1, /*step_delay=*/40);
     current_angle = target;
-    delay(800);                              // pause à l'extrémité
+    delay(500);
 
-    // === -90 ticks ===
+    // === -180 ticks (vers le bas) ===
     digitalWrite(Pins::LED, LOW);
-    target = constrain(current_angle - 90, 0, 180);
-    sweep(current_angle, target, /*step=*/1, /*step_delay=*/70);
+    target = constrain(current_angle - 180, 0, 180);
+    sweep(current_angle, target, /*step=*/1, /*step_delay=*/40);
     current_angle = target;
-    delay(800);                              // pause à l'autre extrémité
+    delay(500);
 }
