@@ -29,6 +29,14 @@ namespace Pins {
     // Starter (fil reliant à GND, retiré pour démarrer)
     constexpr int STARTER   = 32;
 
+    // Encodeurs quadrature
+    // Encoder 1 = moteur GAUCHE
+    constexpr int ENCODER1_A = 23;
+    constexpr int ENCODER1_B = 22;
+    // Encoder 2 = moteur DROIT
+    constexpr int ENCODER2_A = 4;
+    constexpr int ENCODER2_B = 15;
+
     // LED interne
     constexpr int LED       = 2;
 }
@@ -62,4 +70,9 @@ namespace Config {
     constexpr unsigned long LOOP_PERIOD_MS       = 30;
     constexpr unsigned long SERIAL_BAUD          = 115200;
     constexpr unsigned long PRINT_PERIOD_MS      = 500;
+
+    // Odométrie (paramètres robot, voir 01_Test_PAMI_firmware)
+    constexpr float WHEEL_DIAMETER_M       = 0.0334f;   // diamètre roues - 33.4 mm
+    constexpr float WHEEL_BASE_M           = 0.082f;    // empattement   - 82 mm
+    constexpr int   ENCODER_PULSES_PER_REV = 2110;      // impulsions par tour
 }
