@@ -65,6 +65,32 @@ static bool starterReleased() {
     return digitalRead(Pins::STARTER) == HIGH;
 }
 
+// Auto-test moteurs au démarrage. Permet de vérifier visuellement
+// quel moteur ne tourne pas.
+static void motorSelfTest() {
+    Serial.println("--- Self-test moteurs ---");
+
+    Serial.println(">> Moteur GAUCHE (avant) pendant 600 ms");
+    drivetrain.tankDrive(180, 0);
+    delay(600);
+    drivetrain.stop();
+    delay(300);
+
+    Serial.println(">> Moteur DROIT (avant) pendant 600 ms");
+    drivetrain.tankDrive(0, 180);
+    delay(600);
+    drivetrain.stop();
+    delay(300);
+
+    Serial.println(">> Les DEUX (avant) pendant 600 ms");
+    drivetrain.drive(180);
+    delay(600);
+    drivetrain.stop();
+    delay(300);
+
+    Serial.println("--- Fin self-test ---");
+}
+
 // =========== setup ===========
 void setup() {
     Serial.begin(Config::SERIAL_BAUD);
@@ -73,6 +99,13 @@ void setup() {
     Serial.println("=================================");
     Serial.println(" PAMI Match Sequence");
     Serial.println("=================================");
+    Serial.printf(" Motors  : R(D%d/D%d)  L(D%d/D%d)\n",
+                  Pins::RIGHT_IN1, Pins::RIGHT_IN2,
+                  Pins::LEFT_IN1,  Pins::LEFT_IN2);
+    Serial.printf(" Sonar   : TRIG=D%d  ECHO=D%d\n", Pins::US_TRIG, Pins::US_ECHO);
+    Serial.printf(" Starter : D%d (INPUT_PULLUP)\n", Pins::STARTER);
+    Serial.printf(" Servo   : D%d\n", Pins::SERVO);
+    Serial.println("=================================");
 
     pinMode(Pins::LED, OUTPUT);
     pinMode(Pins::STARTER, INPUT_PULLUP);
@@ -80,6 +113,20 @@ void setup() {
     drivetrain.begin();
     sonar.begin();
     drivetrain.stop();
+
+    delay(500);            // laisse le pull-up se stabiliser
+    motorSelfTest();
+
+    // Choix de phase initiale en fonction du starter au boot
+    bool starter_in_at_boot = !starterReleased();   // LOW (pulled to GND) = starter en place
+    if (starter_in_at_boot) {
+        Serial.println(">> Starter détecté au boot — attente de retrait, puis 90 s");
+        current_phase = Phase::WAIT_STARTER;
+    } else {
+        Serial.println(">> Pas de starter au boot — départ IMMÉDIAT (skip 90 s)");
+        current_phase = Phase::FORWARD_1;
+    }
+    phase_elapsed_ms = 0;
 }
 
 // =========== loop ===========
