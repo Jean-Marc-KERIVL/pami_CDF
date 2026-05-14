@@ -1,34 +1,31 @@
 // ============================================================
-//  PAMI Robot — Séquence match
+//  PAMI Robot — Match simple : avance tout droit
 // ============================================================
 //
-//  ⚠️ Pas de Serial.print : LEFT_IN2 est sur TX (GPIO1).
-//  Utiliser le retour visuel via la LED interne (D2).
+//  ⚠️ Pas de Serial : LEFT_IN2 est sur TX (GPIO1).
+//  Retour visuel uniquement via la LED interne D2.
 //
 //  Câblage:
 //    Moteur DROIT  : IN1=D19, IN2=D21
 //    Moteur GAUCHE : IN1=D18, IN2=TX (GPIO1)
 //    Ultrasons     : TRIG=D27, ECHO=D14
-//    Servo         : D26 (réservé)
 //    Starter       : D32 (INPUT_PULLUP) — GND par défaut, retiré pour démarrer
 //    LED interne   : D2
 //
 //  Séquence:
 //    Au boot:
-//      - starter en place (LOW) -> WAIT_STARTER, puis 90 s, puis avance
-//      - starter retiré (HIGH)  -> départ IMMÉDIAT (skip 90 s)
-//    Puis: avance 10 s -> demi-tour -> avance 10 s -> stop
+//      - starter en place (LOW au boot) -> WAIT_STARTER, puis 90 s, puis FORWARD
+//      - starter retiré (HIGH au boot)  -> départ IMMÉDIAT (skip 90 s)
+//    Puis: avance 10 s -> STOP définitif
 //
 //  Sécurité obstacle:
-//    distance < 10 cm pendant FORWARD_1/2 -> moteurs coupés
-//    (le timer de phase est pausé ; reprend dès que l'obstacle est > 13 cm)
-//    Pendant le demi-tour : obstacle ignoré
+//    distance < 10 cm pendant FORWARD -> moteurs coupés (timer pausé)
+//    Reprise dès que > 13 cm.
 
 #include "Pins.h"
 #include "Motor.h"
 #include "Drivetrain.h"
 #include "UltrasonicSensor.h"
-#include "Servo.h"
 
 // =========== Instances globales ===========
 Motor motorLeft (Pins::LEFT_IN1,  Pins::LEFT_IN2,  /*inverted=*/true);
@@ -36,15 +33,12 @@ Motor motorRight(Pins::RIGHT_IN1, Pins::RIGHT_IN2, /*inverted=*/false);
 Drivetrain drivetrain(motorLeft, motorRight);
 
 UltrasonicSensor sonar(Pins::US_TRIG, Pins::US_ECHO, Config::ECHO_TIMEOUT_US);
-Servo servo(Pins::SERVO);
 
 // =========== State machine ===========
 enum class Phase {
     WAIT_STARTER,
     COUNTDOWN,
-    FORWARD_1,
-    UTURN,
-    FORWARD_2,
+    FORWARD,
     DONE
 };
 
@@ -59,7 +53,7 @@ static bool obstacleDetected(long dist_cm) {
     return dist_cm < Config::DIST_STOP_CM;
 }
 
-// Starter en pull-up : LOW = en place, HIGH = retiré
+// Starter en pull-up : LOW = en place (GND), HIGH = retiré
 static bool starterReleased() {
     return digitalRead(Pins::STARTER) == HIGH;
 }
@@ -89,7 +83,6 @@ void setup() {
 
     drivetrain.begin();
     sonar.begin();
-    servo.begin();           // initialise le servo (position neutre 90°)
     drivetrain.stop();
 
     // 3 flashs rapides = boot OK
@@ -106,7 +99,7 @@ void setup() {
     // Choix de la phase initiale
     if (starterReleased()) {
         // Pas de starter au boot -> départ immédiat
-        current_phase = Phase::FORWARD_1;
+        current_phase = Phase::FORWARD;
     } else {
         // Starter en place au boot -> attente
         current_phase = Phase::WAIT_STARTER;
@@ -124,7 +117,6 @@ void loop() {
 
     long dist = sonar.readCm();
     blocked = obstacleDetected(dist);
-    bool safe = (current_phase == Phase::UTURN) || !blocked;
 
     switch (current_phase) {
 
@@ -142,45 +134,20 @@ void loop() {
             digitalWrite(Pins::LED, (millis() / 200) % 2);   // rapide
             phase_elapsed_ms += dt;
             if (phase_elapsed_ms >= Config::WAIT_AFTER_STARTER_MS) {
-                current_phase    = Phase::FORWARD_1;
+                current_phase    = Phase::FORWARD;
                 phase_elapsed_ms = 0;
             }
             break;
 
-        case Phase::FORWARD_1:
-            if (safe) {
+        case Phase::FORWARD:
+            if (blocked) {
+                drivetrain.stop();
+                digitalWrite(Pins::LED, (millis() / 100) % 2);   // clignote vite
+            } else {
                 drivetrain.drive(Config::SPEED_CRUISE);
                 phase_elapsed_ms += dt;
-            } else {
-                drivetrain.stop();
+                digitalWrite(Pins::LED, HIGH);
             }
-            digitalWrite(Pins::LED, safe ? HIGH : ((millis() / 100) % 2));
-            if (phase_elapsed_ms >= Config::FORWARD_DURATION_MS) {
-                current_phase    = Phase::UTURN;
-                phase_elapsed_ms = 0;
-            }
-            break;
-
-        case Phase::UTURN:
-            // Demi-tour : obstacle ignoré
-            drivetrain.turnInPlace(Config::SPEED_TURN);
-            phase_elapsed_ms += dt;
-            digitalWrite(Pins::LED, (millis() / 80) % 2);    // très rapide
-            if (phase_elapsed_ms >= Config::UTURN_DURATION_MS) {
-                drivetrain.stop();
-                current_phase    = Phase::FORWARD_2;
-                phase_elapsed_ms = 0;
-            }
-            break;
-
-        case Phase::FORWARD_2:
-            if (safe) {
-                drivetrain.drive(Config::SPEED_CRUISE);
-                phase_elapsed_ms += dt;
-            } else {
-                drivetrain.stop();
-            }
-            digitalWrite(Pins::LED, safe ? HIGH : ((millis() / 100) % 2));
             if (phase_elapsed_ms >= Config::FORWARD_DURATION_MS) {
                 current_phase = Phase::DONE;
             }
@@ -188,12 +155,7 @@ void loop() {
 
         case Phase::DONE:
             drivetrain.stop();
-            // Servo oscille haut/bas indéfiniment
-            servo.toggleUpDown(Config::SERVO_TOGGLE_PERIOD_MS,
-                               Config::SERVO_ANGLE_LOW,
-                               Config::SERVO_ANGLE_HIGH);
-            // LED suit le servo : ON quand haut, OFF quand bas
-            digitalWrite(Pins::LED, (millis() / Config::SERVO_TOGGLE_PERIOD_MS) % 2);
+            digitalWrite(Pins::LED, LOW);
             break;
     }
 
