@@ -26,6 +26,7 @@
 #include "Motor.h"
 #include "Drivetrain.h"
 #include "UltrasonicSensor.h"
+#include "Servo.h"
 
 // =========== Instances globales ===========
 Motor motorLeft (Pins::LEFT_IN1,  Pins::LEFT_IN2,  /*inverted=*/true);
@@ -33,6 +34,7 @@ Motor motorRight(Pins::RIGHT_IN1, Pins::RIGHT_IN2, /*inverted=*/false);
 Drivetrain drivetrain(motorLeft, motorRight);
 
 UltrasonicSensor sonar(Pins::US_TRIG, Pins::US_ECHO, Config::ECHO_TIMEOUT_US);
+Servo servo(Pins::SERVO);
 
 // =========== State machine ===========
 enum class Phase {
@@ -83,6 +85,7 @@ void setup() {
 
     drivetrain.begin();
     sonar.begin();
+    servo.begin();         // position neutre (90°)
     drivetrain.stop();
 
     // 3 flashs rapides = boot OK
@@ -155,7 +158,12 @@ void loop() {
 
         case Phase::DONE:
             drivetrain.stop();
-            digitalWrite(Pins::LED, LOW);
+            // Servo oscille haut/bas indéfiniment
+            servo.toggleUpDown(Config::SERVO_TOGGLE_PERIOD_MS,
+                               Config::SERVO_ANGLE_LOW,
+                               Config::SERVO_ANGLE_HIGH);
+            // LED suit le servo
+            digitalWrite(Pins::LED, (millis() / Config::SERVO_TOGGLE_PERIOD_MS) % 2);
             break;
     }
 
