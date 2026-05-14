@@ -1,5 +1,5 @@
 // ============================================================
-//  PAMI Robot — 3s moteurs (avec obstacle + odométrie) + servo
+//  PAMI Robot — 4s moteurs (PID + obstacle + odométrie) + servo
 // ============================================================
 //
 //  Câblage:
@@ -12,12 +12,12 @@
 //    LED interne   : D2
 //
 //  Séquence:
-//    1. Boot : 3 flashs + 1.5 s de stabilisation
-//    2. Les 2 moteurs avancent pendant 3 s (rampe + obstacle stop)
-//    3. Stop définitif des moteurs (la pose finale est conservée)
-//    4. Servo SG90 oscille doucement jusqu'à coupure d'alim
-//
-//  L'odométrie est mise à jour en continu pendant la phase moteur.
+//    1. Boot : 3 flashs + 1.5 s stabilisation
+//    2. Avance 4 s en ligne droite (PID sur asymétrie d'encodeurs)
+//       - stop temporaire si obstacle < 10 cm
+//       - ralentit / accélère un moteur pour compenser l'autre
+//    3. Stop définitif des moteurs
+//    4. Servo SG90 oscille lentement (jusqu'à coupure d'alim)
 
 #include "Pins.h"
 #include "Motor.h"
@@ -46,9 +46,17 @@ Odometry odometry(encoderLeft, encoderRight,
                   Config::WHEEL_BASE_M,
                   Config::ENCODER_PULSES_PER_REV);
 
-// ISR statiques attachées à chaque encodeur (IRAM pour ESP32)
 void IRAM_ATTR isrEncoderLeft()  { encoderLeft.handleInterrupt();  }
 void IRAM_ATTR isrEncoderRight() { encoderRight.handleInterrupt(); }
+
+// =========== Paramètres PID ===========
+//   error = nb pulses encoder droit - nb pulses encoder gauche
+//   correction > 0 -> on booste le gauche et on ralentit le droit
+constexpr float PID_KP = 0.40f;
+constexpr float PID_KI = 0.02f;
+constexpr float PID_KD = 0.20f;
+constexpr int   PID_MAX_CORRECTION = 60;     // limite l'effet du PID
+constexpr float PID_INTEGRAL_LIMIT = 200.0f;
 
 // =========== Helpers ===========
 void rampUp(int target_speed, int duration_ms) {
@@ -57,21 +65,29 @@ void rampUp(int target_speed, int duration_ms) {
     for (int i = 1; i <= steps; ++i) {
         int s = (target_speed * i) / steps;
         drivetrain.drive(s);
-        odometry.update();          // suit la pose même en rampe
+        odometry.update();
         delay(step_delay);
     }
 }
 
-// Avance pendant duration_ms en s'arrêtant si obstacle proche.
-// L'odométrie est mise à jour à chaque tick.
-void driveForwardWithObstacle(int speed, unsigned long duration_ms) {
+// Avance pendant duration_ms en ligne droite via PID,
+// s'arrête si obstacle proche (timer pausé).
+void driveForwardPID(int base_speed, unsigned long duration_ms) {
+    // Reset des encodeurs pour partir de 0
+    encoderLeft.reset();
+    encoderRight.reset();
+    odometry.init();
+
     unsigned long elapsed_moving = 0;
     unsigned long last_tick = millis();
     bool moving = false;
 
+    long  last_error      = 0;
+    float error_integral  = 0.0f;
+
     while (elapsed_moving < duration_ms) {
         unsigned long now = millis();
-        unsigned long dt = now - last_tick;
+        unsigned long dt  = now - last_tick;
         last_tick = now;
 
         long dist = sonar.readCm();
@@ -83,11 +99,32 @@ void driveForwardWithObstacle(int speed, unsigned long duration_ms) {
                 moving = false;
             }
             digitalWrite(Pins::LED, (millis() / 100) % 2);
+            // Reset PID quand on s'arrête pour ne pas accumuler d'integral
+            error_integral = 0.0f;
+            last_error = 0;
         } else {
-            if (!moving) {
-                drivetrain.drive(speed);
-                moving = true;
-            }
+            // === PID asymétrie d'encodeurs ===
+            long error = encoderRight.getCount() - encoderLeft.getCount();
+            error_integral += error * (dt / 1000.0f);
+            if (error_integral >  PID_INTEGRAL_LIMIT) error_integral =  PID_INTEGRAL_LIMIT;
+            if (error_integral < -PID_INTEGRAL_LIMIT) error_integral = -PID_INTEGRAL_LIMIT;
+            long derivative = error - last_error;
+            last_error = error;
+
+            float correction_f = PID_KP * error
+                               + PID_KI * error_integral
+                               + PID_KD * derivative;
+            int correction = (int)correction_f;
+            if (correction >  PID_MAX_CORRECTION) correction =  PID_MAX_CORRECTION;
+            if (correction < -PID_MAX_CORRECTION) correction = -PID_MAX_CORRECTION;
+
+            int left_speed  = base_speed + correction;
+            int right_speed = base_speed - correction;
+            left_speed  = constrain(left_speed,  0, 255);
+            right_speed = constrain(right_speed, 0, 255);
+
+            drivetrain.tankDrive(left_speed, right_speed);
+            moving = true;
             elapsed_moving += dt;
             digitalWrite(Pins::LED, HIGH);
         }
@@ -112,7 +149,6 @@ void sweep(int from_deg, int to_deg, int step_deg, int step_delay_ms) {
 
 // =========== setup ===========
 void setup() {
-    // 🛡️ Désactive le détecteur de brown-out
     WRITE_PERI_REG(RTC_CNTL_BROWN_OUT_REG, 0);
 
     pinMode(Pins::LED, OUTPUT);
@@ -135,26 +171,23 @@ void setup() {
 
     delay(1500);
 
-    // === Avance 3 s ===
-    odometry.resetPose();
+    // === Avance 4 s en ligne droite (PID) ===
     rampUp(180, 400);
-    driveForwardWithObstacle(Config::SPEED_CRUISE, 3000);    // 3 secondes
+    driveForwardPID(Config::SPEED_CRUISE, 4000);     // 4 secondes
     drivetrain.stop();
     digitalWrite(Pins::LED, LOW);
-
-    // À ce point, l'odométrie contient :
-    //   odometry.getX(), getY(), getTheta(), getDistanceM()
 
     delay(500);
 }
 
 // =========== loop ===========
+// Servo lent : step=2 toutes les 40 ms -> ~1.8 s par sens
 void loop() {
     digitalWrite(Pins::LED, HIGH);
-    sweep(0, 90, /*step=*/2, /*step_delay=*/25);
-    delay(300);
+    sweep(0, 90, /*step=*/2, /*step_delay=*/40);
+    delay(500);
 
     digitalWrite(Pins::LED, LOW);
-    sweep(90, 0, /*step=*/2, /*step_delay=*/25);
-    delay(300);
+    sweep(90, 0, /*step=*/2, /*step_delay=*/40);
+    delay(500);
 }
