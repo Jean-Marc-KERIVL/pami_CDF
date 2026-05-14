@@ -63,12 +63,27 @@ void setup() {
     delay(500);
 }
 
-void loop() {
-    servo.setAngle(0);
-    digitalWrite(Pins::LED, HIGH);
-    delay(500);
+// Balayage doux du servo: monte ou descend par petits pas
+// pour limiter les pics de courant (et donc les brown-out)
+void sweep(int from_deg, int to_deg, int step_deg, int step_delay_ms) {
+    int step = (to_deg > from_deg) ? step_deg : -step_deg;
+    int a = from_deg;
+    while ((step > 0 && a < to_deg) || (step < 0 && a > to_deg)) {
+        servo.setAngle(a);
+        a += step;
+        delay(step_delay_ms);
+    }
+    servo.setAngle(to_deg);
+}
 
-    servo.setAngle(90);
+void loop() {
+    // Monte doucement 0° -> 90° (45 pas de 2°, 30 ms chacun = 1.35 s)
+    digitalWrite(Pins::LED, HIGH);
+    sweep(0, 90, /*step=*/2, /*step_delay=*/30);
+    delay(300);    // pause en haut
+
+    // Descend doucement 90° -> 0°
     digitalWrite(Pins::LED, LOW);
-    delay(500);
+    sweep(90, 0, /*step=*/2, /*step_delay=*/30);
+    delay(300);    // pause en bas
 }
