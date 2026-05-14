@@ -52,10 +52,10 @@ void IRAM_ATTR isrEncoderRight() { encoderRight.handleInterrupt(); }
 // =========== Paramètres PID ===========
 //   error = nb pulses encoder droit - nb pulses encoder gauche
 //   correction > 0 -> on booste le gauche et on ralentit le droit
-constexpr float PID_KP = 0.40f;
-constexpr float PID_KI = 0.02f;
-constexpr float PID_KD = 0.20f;
-constexpr int   PID_MAX_CORRECTION = 60;     // limite l'effet du PID
+constexpr float PID_KP = 0.70f;     // augmenté: le robot déviait à gauche
+constexpr float PID_KI = 0.03f;
+constexpr float PID_KD = 0.25f;
+constexpr int   PID_MAX_CORRECTION = 80;     // limite l'effet du PID
 constexpr float PID_INTEGRAL_LIMIT = 200.0f;
 
 // =========== Helpers ===========
@@ -155,6 +155,7 @@ void setup() {
 
     drivetrain.begin();
     servo.begin();
+    servo.setAngle(180);          // position initiale 180°
     sonar.begin();
 
     encoderLeft .begin(isrEncoderLeft);
@@ -181,13 +182,14 @@ void setup() {
 }
 
 // =========== loop ===========
-// Servo lent : step=2 toutes les 40 ms -> ~1.8 s par sens
+// Servo très lent : step=2 toutes les 60 ms -> ~2.7 s par sens
+// Oscille entre 180° (position initiale) et 90°
 void loop() {
     digitalWrite(Pins::LED, HIGH);
-    sweep(0, 90, /*step=*/2, /*step_delay=*/40);
-    delay(500);
+    sweep(180, 90, /*step=*/2, /*step_delay=*/60);
+    delay(600);
 
     digitalWrite(Pins::LED, LOW);
-    sweep(90, 0, /*step=*/2, /*step_delay=*/40);
-    delay(500);
+    sweep(90, 180, /*step=*/2, /*step_delay=*/60);
+    delay(600);
 }
