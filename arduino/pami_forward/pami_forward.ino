@@ -1,5 +1,5 @@
 // ============================================================
-//  PAMI Robot — 4s moteurs (PID + obstacle + odométrie) + servo
+//  PAMI Robot — Starter + 4s moteurs (PID + obstacle + odométrie) + servo
 // ============================================================
 //
 //  Câblage:
@@ -7,17 +7,20 @@
 //    Moteur GAUCHE : IN1=D18, IN2=TX2 (GPIO17)
 //    Sonar HC-SR04 : TRIG=D27, ECHO=D14
 //    Servo SG90    : D26
+//    Starter       : D32 (INPUT_PULLUP, GND = en place, libre = HIGH)
 //    Encoder GAUCHE: A=D23, B=D22
 //    Encoder DROIT : A=D4,  B=D15
 //    LED interne   : D2
 //
 //  Séquence:
-//    1. Boot : 3 flashs + 1.5 s stabilisation
-//    2. Avance 4 s en ligne droite (PID sur asymétrie d'encodeurs)
-//       - stop temporaire si obstacle < 10 cm
-//       - ralentit / accélère un moteur pour compenser l'autre
-//    3. Stop définitif des moteurs
-//    4. Servo SG90 oscille lentement (jusqu'à coupure d'alim)
+//    1. Boot : 3 flashs + 1 s stabilisation
+//    2. Servo va à la position initiale (SERVO_INIT_ANGLE)
+//    3. Logique starter :
+//       - Starter EN PLACE au boot -> attente retrait + 90 s
+//       - Starter LIBRE au boot    -> départ DIRECT (skip 90 s)
+//    4. Avance 4 s en ligne droite (PID sur encodeurs, obstacle stop)
+//    5. Stop définitif des moteurs
+//    6. Servo SG90 oscille lentement (jusqu'à coupure d'alim)
 
 #include "Pins.h"
 #include "Motor.h"
@@ -57,6 +60,15 @@ constexpr float PID_KI = 0.03f;
 constexpr float PID_KD = 0.25f;
 constexpr int   PID_MAX_CORRECTION = 80;     // limite l'effet du PID
 constexpr float PID_INTEGRAL_LIMIT = 200.0f;
+
+// =========== Position initiale du servo ===========
+constexpr int   SERVO_INIT_ANGLE = 0;        // position au démarrage
+
+// =========== Starter ===========
+constexpr unsigned long STARTER_COUNTDOWN_MS = 90000UL;  // 90 s
+inline bool starterReleased() {
+    return digitalRead(Pins::STARTER) == HIGH;
+}
 
 // =========== Helpers ===========
 void rampUp(int target_speed, int duration_ms) {
@@ -154,8 +166,10 @@ void setup() {
     pinMode(Pins::LED, OUTPUT);
 
     drivetrain.begin();
-    servo.begin();                // pas de position initiale forcée
+    servo.begin();
+    servo.setAngle(SERVO_INIT_ANGLE);   // position initiale au démarrage
     sonar.begin();
+    pinMode(Pins::STARTER, INPUT_PULLUP);
 
     encoderLeft .begin(isrEncoderLeft);
     encoderRight.begin(isrEncoderRight);
@@ -169,11 +183,30 @@ void setup() {
         digitalWrite(Pins::LED, LOW);  delay(120);
     }
 
-    delay(1500);
+    delay(1000);
+
+    // === Logique starter ===
+    // Lecture stable (debounce)
+    bool starter_in_at_boot = !starterReleased();
+
+    if (starter_in_at_boot) {
+        // Attente du retrait du starter (LED clignote lent)
+        while (!starterReleased()) {
+            digitalWrite(Pins::LED, (millis() / 500) % 2);
+            delay(30);
+        }
+        // Compte à rebours 90 s (LED clignote rapide)
+        unsigned long start_ts = millis();
+        while (millis() - start_ts < STARTER_COUNTDOWN_MS) {
+            digitalWrite(Pins::LED, (millis() / 200) % 2);
+            delay(30);
+        }
+    }
+    // Sinon : départ DIRECT
 
     // === Avance 4 s en ligne droite (PID) ===
     rampUp(180, 400);
-    driveForwardPID(Config::SPEED_CRUISE, 4000);     // 4 secondes
+    driveForwardPID(Config::SPEED_CRUISE, 4000);
     drivetrain.stop();
     digitalWrite(Pins::LED, LOW);
 
