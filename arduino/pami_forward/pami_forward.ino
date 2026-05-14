@@ -59,8 +59,9 @@ void setup() {
 
 // =========== loop ===========
 void loop() {
-    // === ÉTAPE 2 : servo oscille indéfiniment ===
-    servo.toggleUpDown(500, 0, 180);
-    digitalWrite(Pins::LED, (millis() / 500) % 2);
+    // === ÉTAPE 2 : servo s'agite indéfiniment (jusqu'à coupure d'alim) ===
+    //  amplitude 0° -> 90° toutes les 350 ms
+    servo.toggleUpDown(350, 0, 90);
+    digitalWrite(Pins::LED, (millis() / 350) % 2);
     delay(20);
 }

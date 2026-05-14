@@ -17,7 +17,7 @@ namespace Pins {
 
     // Moteur gauche
     constexpr int LEFT_IN1  = 18;
-    constexpr int LEFT_IN2  = 1;      // TX (GPIO1) — ⚠️ pas de Serial possible
+    constexpr int LEFT_IN2  = 17;     // TX2 (GPIO17) — UART2, Serial USB OK
 
     // Ultrasons HC-SR04
     constexpr int US_TRIG   = 27;
