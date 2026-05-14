@@ -154,8 +154,7 @@ void setup() {
     pinMode(Pins::LED, OUTPUT);
 
     drivetrain.begin();
-    servo.begin();
-    servo.setAngle(180);          // position initiale 180°
+    servo.begin();                // pas de position initiale forcée
     sonar.begin();
 
     encoderLeft .begin(isrEncoderLeft);
@@ -182,14 +181,23 @@ void setup() {
 }
 
 // =========== loop ===========
-// Servo très lent : step=2 toutes les 60 ms -> ~2.7 s par sens
-// Oscille entre 180° (position initiale) et 90°
+// Servo : incréments relatifs +90 puis -90, très doucement pour
+// limiter les appels de courant.
+//   step=1 toutes les 70 ms -> ~6.3 s par mouvement de 90°
 void loop() {
-    digitalWrite(Pins::LED, HIGH);
-    sweep(180, 90, /*step=*/2, /*step_delay=*/60);
-    delay(600);
+    static int current_angle = 90;          // position interne (arbitraire au boot)
 
+    // === +90 ticks ===
+    digitalWrite(Pins::LED, HIGH);
+    int target = constrain(current_angle + 90, 0, 180);
+    sweep(current_angle, target, /*step=*/1, /*step_delay=*/70);
+    current_angle = target;
+    delay(800);                              // pause à l'extrémité
+
+    // === -90 ticks ===
     digitalWrite(Pins::LED, LOW);
-    sweep(90, 180, /*step=*/2, /*step_delay=*/60);
-    delay(600);
+    target = constrain(current_angle - 90, 0, 180);
+    sweep(current_angle, target, /*step=*/1, /*step_delay=*/70);
+    current_angle = target;
+    delay(800);                              // pause à l'autre extrémité
 }
