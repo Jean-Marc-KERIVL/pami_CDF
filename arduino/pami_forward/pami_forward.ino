@@ -2,18 +2,27 @@
 //  PAMI Robot — Séquence match
 // ============================================================
 //
-//  Comportement:
-//    1. WAIT_STARTER : attend que le starter soit retiré (D32 -> HIGH)
-//    2. COUNTDOWN    : attend 90 secondes
-//    3. FORWARD_1    : avance pendant 10 s
-//    4. UTURN        : demi-tour (~1.5 s, à calibrer)
-//    5. FORWARD_2    : avance pendant 10 s
-//    6. DONE         : arrêt définitif
+//  ⚠️ Pas de Serial.print : LEFT_IN2 est sur TX (GPIO1).
+//  Utiliser le retour visuel via la LED interne (D2).
+//
+//  Câblage:
+//    Moteur DROIT  : IN1=D19, IN2=D21
+//    Moteur GAUCHE : IN1=D18, IN2=TX (GPIO1)
+//    Ultrasons     : TRIG=D27, ECHO=D14
+//    Servo         : D26 (réservé)
+//    Starter       : D32 (INPUT_PULLUP) — GND par défaut, retiré pour démarrer
+//    LED interne   : D2
+//
+//  Séquence:
+//    Au boot:
+//      - starter en place (LOW) -> WAIT_STARTER, puis 90 s, puis avance
+//      - starter retiré (HIGH)  -> départ IMMÉDIAT (skip 90 s)
+//    Puis: avance 10 s -> demi-tour -> avance 10 s -> stop
 //
 //  Sécurité obstacle:
-//    À tout moment (sauf pendant UTURN), si distance < 10 cm
-//    -> moteurs coupés, le temps de phase est PAUSÉ.
-//    Quand l'obstacle dégage (>13 cm), reprise normale.
+//    distance < 10 cm pendant FORWARD_1/2 -> moteurs coupés
+//    (le timer de phase est pausé ; reprend dès que l'obstacle est > 13 cm)
+//    Pendant le demi-tour : obstacle ignoré
 
 #include "Pins.h"
 #include "Motor.h"
@@ -38,75 +47,41 @@ enum class Phase {
 };
 
 static Phase         current_phase    = Phase::WAIT_STARTER;
-static unsigned long phase_elapsed_ms = 0;   // temps effectif dans la phase
+static unsigned long phase_elapsed_ms = 0;
 static bool          blocked          = false;
 
-const char* phaseName(Phase p) {
-    switch (p) {
-        case Phase::WAIT_STARTER: return "WAIT_STARTER";
-        case Phase::COUNTDOWN:    return "COUNTDOWN";
-        case Phase::FORWARD_1:    return "FORWARD_1";
-        case Phase::UTURN:        return "UTURN";
-        case Phase::FORWARD_2:    return "FORWARD_2";
-        case Phase::DONE:         return "DONE";
-    }
-    return "?";
-}
-
-// Distance courante et détection d'obstacle avec hystérésis
+// Hystérésis sur la détection d'obstacle
 static bool obstacleDetected(long dist_cm) {
     if (dist_cm < 0) return false;
     if (blocked) return dist_cm < (Config::DIST_STOP_CM + Config::DIST_HYST_CM);
     return dist_cm < Config::DIST_STOP_CM;
 }
 
-// Lit le starter (avec pull-up): LOW = en place, HIGH = retiré
+// Starter en pull-up : LOW = en place, HIGH = retiré
 static bool starterReleased() {
     return digitalRead(Pins::STARTER) == HIGH;
 }
 
-// Auto-test moteurs au démarrage. Permet de vérifier visuellement
-// quel moteur ne tourne pas.
+// Auto-test moteurs au démarrage : 600 ms par moteur
 static void motorSelfTest() {
-    Serial.println("--- Self-test moteurs ---");
-
-    Serial.println(">> Moteur GAUCHE (avant) pendant 600 ms");
-    drivetrain.tankDrive(180, 0);
+    drivetrain.tankDrive(180, 0);    // moteur gauche seul
     delay(600);
     drivetrain.stop();
     delay(300);
 
-    Serial.println(">> Moteur DROIT (avant) pendant 600 ms");
-    drivetrain.tankDrive(0, 180);
+    drivetrain.tankDrive(0, 180);    // moteur droit seul
     delay(600);
     drivetrain.stop();
     delay(300);
 
-    Serial.println(">> Les DEUX (avant) pendant 600 ms");
-    drivetrain.drive(180);
+    drivetrain.drive(180);           // les deux
     delay(600);
     drivetrain.stop();
     delay(300);
-
-    Serial.println("--- Fin self-test ---");
 }
 
 // =========== setup ===========
 void setup() {
-    Serial.begin(Config::SERIAL_BAUD);
-    delay(200);
-    Serial.println();
-    Serial.println("=================================");
-    Serial.println(" PAMI Match Sequence");
-    Serial.println("=================================");
-    Serial.printf(" Motors  : R(D%d/D%d)  L(D%d/D%d)\n",
-                  Pins::RIGHT_IN1, Pins::RIGHT_IN2,
-                  Pins::LEFT_IN1,  Pins::LEFT_IN2);
-    Serial.printf(" Sonar   : TRIG=D%d  ECHO=D%d\n", Pins::US_TRIG, Pins::US_ECHO);
-    Serial.printf(" Starter : D%d (INPUT_PULLUP)\n", Pins::STARTER);
-    Serial.printf(" Servo   : D%d\n", Pins::SERVO);
-    Serial.println("=================================");
-
     pinMode(Pins::LED, OUTPUT);
     pinMode(Pins::STARTER, INPUT_PULLUP);
 
@@ -114,25 +89,31 @@ void setup() {
     sonar.begin();
     drivetrain.stop();
 
-    delay(500);            // laisse le pull-up se stabiliser
+    // 3 flashs rapides = boot OK
+    for (int i = 0; i < 3; ++i) {
+        digitalWrite(Pins::LED, HIGH);
+        delay(120);
+        digitalWrite(Pins::LED, LOW);
+        delay(120);
+    }
+
+    delay(500);   // stabilisation pull-up
     motorSelfTest();
 
-    // Choix de phase initiale en fonction du starter au boot
-    bool starter_in_at_boot = !starterReleased();   // LOW (pulled to GND) = starter en place
-    if (starter_in_at_boot) {
-        Serial.println(">> Starter détecté au boot — attente de retrait, puis 90 s");
-        current_phase = Phase::WAIT_STARTER;
-    } else {
-        Serial.println(">> Pas de starter au boot — départ IMMÉDIAT (skip 90 s)");
+    // Choix de la phase initiale
+    if (starterReleased()) {
+        // Pas de starter au boot -> départ immédiat
         current_phase = Phase::FORWARD_1;
+    } else {
+        // Starter en place au boot -> attente
+        current_phase = Phase::WAIT_STARTER;
     }
     phase_elapsed_ms = 0;
 }
 
 // =========== loop ===========
 void loop() {
-    static unsigned long t_last_tick  = millis();
-    static unsigned long t_last_print = 0;
+    static unsigned long t_last_tick = millis();
 
     unsigned long now = millis();
     unsigned long dt  = now - t_last_tick;
@@ -140,19 +121,14 @@ void loop() {
 
     long dist = sonar.readCm();
     blocked = obstacleDetected(dist);
+    bool safe = (current_phase == Phase::UTURN) || !blocked;
 
-    // Pendant le demi-tour, on IGNORE l'obstacle (sinon on reste bloqué)
-    bool ignore_obstacle = (current_phase == Phase::UTURN);
-    bool safe = ignore_obstacle || !blocked;
-
-    // ===== State machine =====
     switch (current_phase) {
 
         case Phase::WAIT_STARTER:
             drivetrain.stop();
-            digitalWrite(Pins::LED, (millis() / 500) % 2);  // clignote lent
+            digitalWrite(Pins::LED, (millis() / 500) % 2);   // lent
             if (starterReleased()) {
-                Serial.println(">> Starter retiré, départ du compte à rebours 90s");
                 current_phase    = Phase::COUNTDOWN;
                 phase_elapsed_ms = 0;
             }
@@ -160,10 +136,9 @@ void loop() {
 
         case Phase::COUNTDOWN:
             drivetrain.stop();
-            digitalWrite(Pins::LED, (millis() / 200) % 2);  // clignote rapide
+            digitalWrite(Pins::LED, (millis() / 200) % 2);   // rapide
             phase_elapsed_ms += dt;
             if (phase_elapsed_ms >= Config::WAIT_AFTER_STARTER_MS) {
-                Serial.println(">> 90s écoulés - AVANCE 1");
                 current_phase    = Phase::FORWARD_1;
                 phase_elapsed_ms = 0;
             }
@@ -178,19 +153,17 @@ void loop() {
             }
             digitalWrite(Pins::LED, safe ? HIGH : ((millis() / 100) % 2));
             if (phase_elapsed_ms >= Config::FORWARD_DURATION_MS) {
-                Serial.println(">> 10s écoulés - DEMI-TOUR");
                 current_phase    = Phase::UTURN;
                 phase_elapsed_ms = 0;
             }
             break;
 
         case Phase::UTURN:
-            // Demi-tour sur place. On IGNORE l'obstacle.
+            // Demi-tour : obstacle ignoré
             drivetrain.turnInPlace(Config::SPEED_TURN);
             phase_elapsed_ms += dt;
-            digitalWrite(Pins::LED, (millis() / 80) % 2);
+            digitalWrite(Pins::LED, (millis() / 80) % 2);    // très rapide
             if (phase_elapsed_ms >= Config::UTURN_DURATION_MS) {
-                Serial.println(">> Demi-tour fini - AVANCE 2");
                 drivetrain.stop();
                 current_phase    = Phase::FORWARD_2;
                 phase_elapsed_ms = 0;
@@ -206,7 +179,6 @@ void loop() {
             }
             digitalWrite(Pins::LED, safe ? HIGH : ((millis() / 100) % 2));
             if (phase_elapsed_ms >= Config::FORWARD_DURATION_MS) {
-                Serial.println(">> Terminé - STOP");
                 current_phase = Phase::DONE;
             }
             break;
@@ -215,17 +187,6 @@ void loop() {
             drivetrain.stop();
             digitalWrite(Pins::LED, LOW);
             break;
-    }
-
-    // ===== Log périodique =====
-    if (now - t_last_print >= Config::PRINT_PERIOD_MS) {
-        t_last_print = now;
-        Serial.printf("[%s] elapsed=%lu ms | dist=%ld cm | blocked=%d | starter=%s\n",
-                      phaseName(current_phase),
-                      phase_elapsed_ms,
-                      dist,
-                      (int)blocked,
-                      starterReleased() ? "OUT" : "IN");
     }
 
     delay(Config::LOOP_PERIOD_MS);
