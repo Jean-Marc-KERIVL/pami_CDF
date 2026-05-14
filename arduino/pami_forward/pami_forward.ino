@@ -120,13 +120,13 @@ void setup() {
 }
 
 void loop() {
-    // Servo : balayage doux mais plus rapide que la version précédente
-    // step=4, delay=18 ms -> ~400 ms pour 90°
+    // Servo : balayage doux et modéré
+    // step=2, delay=25 ms -> ~1.1 s pour 90°
     digitalWrite(Pins::LED, HIGH);
-    sweep(0, 90, /*step=*/4, /*step_delay=*/18);
-    delay(200);
+    sweep(0, 90, /*step=*/2, /*step_delay=*/25);
+    delay(300);
 
     digitalWrite(Pins::LED, LOW);
-    sweep(90, 0, /*step=*/4, /*step_delay=*/18);
-    delay(200);
+    sweep(90, 0, /*step=*/2, /*step_delay=*/25);
+    delay(300);
 }
