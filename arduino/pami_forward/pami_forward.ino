@@ -46,22 +46,23 @@ void setup() {
     // Délai de sécurité avant départ
     delay(1000);
 
+    
+
+}
+
+// =========== loop ===========
+void loop() {
     // === ÉTAPE 1 : les 2 moteurs avancent 5 s ===
     digitalWrite(Pins::LED, HIGH);
     drivetrain.drive(Config::SPEED_CRUISE);
     delay(5000);
     drivetrain.stop();
     digitalWrite(Pins::LED, LOW);
-
-    // Petite pause avant le servo
-    delay(500);
-}
-
-// =========== loop ===========
-void loop() {
-    // === ÉTAPE 2 : servo s'agite indéfiniment (jusqu'à coupure d'alim) ===
-    //  amplitude 0° -> 90° toutes les 350 ms
-    servo.toggleUpDown(350, 0, 90);
-    digitalWrite(Pins::LED, (millis() / 350) % 2);
-    delay(20);
+    // === ÉTAPE 2 : servo actif en continu jusqu'à coupure d'alim ===
+    // amplitude 0° -> 90° toutes les 350 ms
+    while (true) {
+        servo.toggleUpDown(350, 0, 90);
+        digitalWrite(Pins::LED, (millis() / 350) % 2);
+        delay(20);
+    }
 }
