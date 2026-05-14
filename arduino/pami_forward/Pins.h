@@ -5,44 +5,56 @@
 //     - Module MJKDZ (driver L298N dual H-bridge)
 //     - 2 moteurs DC
 //     - Capteur ultrasons HC-SR04
-//
-//   ⚠️ IMPORTANT: LEFT_IN2 a été déplacé de TX (GPIO1) vers D23
-//   pour libérer le Serial USB. Vérifie que ton fil est bien sur D23.
+//     - Servo (D26)
+//     - Starter (D32, vers GND par défaut, libéré au lancement)
 
 #pragma once
 
 namespace Pins {
-    // Moteur droit (via MJKDZ IN1/IN2)
-    constexpr int RIGHT_IN1 = 19;   // D19
-    constexpr int RIGHT_IN2 = 21;   // D21
+    // Moteur droit
+    constexpr int RIGHT_IN1 = 19;
+    constexpr int RIGHT_IN2 = 21;
 
-    // Moteur gauche (via MJKDZ IN3/IN4)
-    constexpr int LEFT_IN1  = 18;   // D18
-    constexpr int LEFT_IN2  = 23;   // D23 (déplacé de TX/GPIO1)
+    // Moteur gauche
+    constexpr int LEFT_IN1  = 18;
+    constexpr int LEFT_IN2  = 23;
 
-    // Capteur ultrasons HC-SR04
-    constexpr int US_TRIG   = 27;   // D27
-    constexpr int US_ECHO   = 14;   // D14
+    // Ultrasons HC-SR04
+    constexpr int US_TRIG   = 27;
+    constexpr int US_ECHO   = 14;
 
-    // LED interne ESP32
+    // Servo (bras / pince)
+    constexpr int SERVO     = 26;
+
+    // Starter (fil reliant à GND, retiré pour démarrer)
+    constexpr int STARTER   = 32;
+
+    // LED interne
     constexpr int LED       = 2;
 }
 
 namespace Config {
-    // PWM
-    constexpr int  PWM_FREQ_HZ       = 1000;   // 1 kHz
-    constexpr int  PWM_RESOLUTION    = 8;      // 0..255
+    // PWM moteurs
+    constexpr int  PWM_FREQ_HZ       = 1000;
+    constexpr int  PWM_RESOLUTION    = 8;       // 0..255
+
+    // Vitesse de croisière (0..255)
+    constexpr int  SPEED_CRUISE      = 220;
+    constexpr int  SPEED_TURN        = 180;     // pour le demi-tour sur place
 
     // Capteur ultrasons
-    constexpr unsigned long ECHO_TIMEOUT_US = 25000UL;  // ~4 m max
+    constexpr unsigned long ECHO_TIMEOUT_US = 25000UL;  // ~4 m
+    constexpr int  DIST_STOP_CM      = 10;      // <10 cm -> arrêt
+    constexpr int  DIST_HYST_CM      =  3;      // +3 cm pour repartir
 
-    // Comportement
-    constexpr int  DIST_STOP_CM      = 20;     // distance d'arrêt (obstacle détecté)
-    constexpr int  SPEED_CRUISE      = 220;    // vitesse de croisière (PWM 0..255)
+    // Séquence
+    constexpr unsigned long STARTER_DEBOUNCE_MS  = 50;
+    constexpr unsigned long WAIT_AFTER_STARTER_MS = 90000UL;  // 90 s
+    constexpr unsigned long FORWARD_DURATION_MS  = 10000UL;   // 10 s
+    constexpr unsigned long UTURN_DURATION_MS    = 1500UL;    // ~1.5 s, à calibrer
 
-    // Timings
-    constexpr unsigned long STARTUP_DELAY_MS = 2000;
-    constexpr unsigned long LOOP_PERIOD_MS   = 50;
-    constexpr unsigned long PRINT_PERIOD_MS  = 200;
-    constexpr unsigned long SERIAL_BAUD      = 115200;
+    // Boucle principale
+    constexpr unsigned long LOOP_PERIOD_MS       = 30;
+    constexpr unsigned long SERIAL_BAUD          = 115200;
+    constexpr unsigned long PRINT_PERIOD_MS      = 500;
 }

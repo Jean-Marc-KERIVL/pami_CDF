@@ -1,17 +1,19 @@
 // ============================================================
-//  PAMI Robot — Avance + arrêt automatique sur obstacle HC-SR04
-//  Architecture C++ : Motor / Drivetrain / UltrasonicSensor
+//  PAMI Robot — Séquence match
 // ============================================================
 //
-//  Câblage (voir Pins.h):
-//    Moteur DROIT  : IN1=D19, IN2=D21
-//    Moteur GAUCHE : IN1=D18, IN2=D23
-//    Ultrasons     : TRIG=D27, ECHO=D14
-//    LED interne   : D2
-//
 //  Comportement:
-//    - distance >= 20 cm OU pas d'écho : avance à SPEED_CRUISE
-//    - distance <  20 cm               : STOP (LED clignote)
+//    1. WAIT_STARTER : attend que le starter soit retiré (D32 -> HIGH)
+//    2. COUNTDOWN    : attend 90 secondes
+//    3. FORWARD_1    : avance pendant 10 s
+//    4. UTURN        : demi-tour (~1.5 s, à calibrer)
+//    5. FORWARD_2    : avance pendant 10 s
+//    6. DONE         : arrêt définitif
+//
+//  Sécurité obstacle:
+//    À tout moment (sauf pendant UTURN), si distance < 10 cm
+//    -> moteurs coupés, le temps de phase est PAUSÉ.
+//    Quand l'obstacle dégage (>13 cm), reprise normale.
 
 #include "Pins.h"
 #include "Motor.h"
@@ -19,64 +21,164 @@
 #include "UltrasonicSensor.h"
 
 // =========== Instances globales ===========
-// Moteur gauche déclaré "inverted" car monté en miroir physiquement
 Motor motorLeft (Pins::LEFT_IN1,  Pins::LEFT_IN2,  /*inverted=*/true);
 Motor motorRight(Pins::RIGHT_IN1, Pins::RIGHT_IN2, /*inverted=*/false);
 Drivetrain drivetrain(motorLeft, motorRight);
 
 UltrasonicSensor sonar(Pins::US_TRIG, Pins::US_ECHO, Config::ECHO_TIMEOUT_US);
 
-// =========== État ===========
-enum class State { CRUISING, BLOCKED };
+// =========== State machine ===========
+enum class Phase {
+    WAIT_STARTER,
+    COUNTDOWN,
+    FORWARD_1,
+    UTURN,
+    FORWARD_2,
+    DONE
+};
 
-// Décide entre AVANCE et STOP avec un peu d'hystérésis pour éviter
-// les oscillations rapides à la frontière du seuil.
-static bool isObstacleClose(long dist_cm, State current) {
-    if (dist_cm < 0) return false; // pas d'écho -> chemin libre
+static Phase         current_phase    = Phase::WAIT_STARTER;
+static unsigned long phase_elapsed_ms = 0;   // temps effectif dans la phase
+static bool          blocked          = false;
 
-    if (current == State::CRUISING) {
-        // On avance: on s'arrête dès qu'on voit l'obstacle au seuil
-        return dist_cm < Config::DIST_STOP_CM;
-    } else {
-        // On est arrêté: on repart seulement si on est nettement plus loin
-        return dist_cm < (Config::DIST_STOP_CM + 5);  // +5 cm marge
+const char* phaseName(Phase p) {
+    switch (p) {
+        case Phase::WAIT_STARTER: return "WAIT_STARTER";
+        case Phase::COUNTDOWN:    return "COUNTDOWN";
+        case Phase::FORWARD_1:    return "FORWARD_1";
+        case Phase::UTURN:        return "UTURN";
+        case Phase::FORWARD_2:    return "FORWARD_2";
+        case Phase::DONE:         return "DONE";
     }
+    return "?";
 }
 
-// =========== Arduino setup ===========
+// Distance courante et détection d'obstacle avec hystérésis
+static bool obstacleDetected(long dist_cm) {
+    if (dist_cm < 0) return false;
+    if (blocked) return dist_cm < (Config::DIST_STOP_CM + Config::DIST_HYST_CM);
+    return dist_cm < Config::DIST_STOP_CM;
+}
+
+// Lit le starter (avec pull-up): LOW = en place, HIGH = retiré
+static bool starterReleased() {
+    return digitalRead(Pins::STARTER) == HIGH;
+}
+
+// =========== setup ===========
 void setup() {
+    Serial.begin(Config::SERIAL_BAUD);
+    delay(200);
+    Serial.println();
+    Serial.println("=================================");
+    Serial.println(" PAMI Match Sequence");
+    Serial.println("=================================");
+
     pinMode(Pins::LED, OUTPUT);
-    digitalWrite(Pins::LED, HIGH);
+    pinMode(Pins::STARTER, INPUT_PULLUP);
 
     drivetrain.begin();
     sonar.begin();
-
-    // Sécurité au démarrage
-    delay(Config::STARTUP_DELAY_MS);
-    digitalWrite(Pins::LED, LOW);
+    drivetrain.stop();
 }
 
-// =========== Arduino loop ===========
+// =========== loop ===========
 void loop() {
-    static State state = State::CRUISING;
+    static unsigned long t_last_tick  = millis();
+    static unsigned long t_last_print = 0;
+
+    unsigned long now = millis();
+    unsigned long dt  = now - t_last_tick;
+    t_last_tick = now;
 
     long dist = sonar.readCm();
+    blocked = obstacleDetected(dist);
 
-    if (isObstacleClose(dist, state)) {
-        // Obstacle proche → STOP
-        if (state != State::BLOCKED) {
+    // Pendant le demi-tour, on IGNORE l'obstacle (sinon on reste bloqué)
+    bool ignore_obstacle = (current_phase == Phase::UTURN);
+    bool safe = ignore_obstacle || !blocked;
+
+    // ===== State machine =====
+    switch (current_phase) {
+
+        case Phase::WAIT_STARTER:
             drivetrain.stop();
-            state = State::BLOCKED;
-        }
-        // LED clignote rapidement pour signaler le stop
-        digitalWrite(Pins::LED, (millis() / 120) % 2);
-    } else {
-        // Chemin libre → AVANCE
-        if (state != State::CRUISING) {
-            state = State::CRUISING;
-        }
-        drivetrain.drive(Config::SPEED_CRUISE);
-        digitalWrite(Pins::LED, HIGH);
+            digitalWrite(Pins::LED, (millis() / 500) % 2);  // clignote lent
+            if (starterReleased()) {
+                Serial.println(">> Starter retiré, départ du compte à rebours 90s");
+                current_phase    = Phase::COUNTDOWN;
+                phase_elapsed_ms = 0;
+            }
+            break;
+
+        case Phase::COUNTDOWN:
+            drivetrain.stop();
+            digitalWrite(Pins::LED, (millis() / 200) % 2);  // clignote rapide
+            phase_elapsed_ms += dt;
+            if (phase_elapsed_ms >= Config::WAIT_AFTER_STARTER_MS) {
+                Serial.println(">> 90s écoulés - AVANCE 1");
+                current_phase    = Phase::FORWARD_1;
+                phase_elapsed_ms = 0;
+            }
+            break;
+
+        case Phase::FORWARD_1:
+            if (safe) {
+                drivetrain.drive(Config::SPEED_CRUISE);
+                phase_elapsed_ms += dt;
+            } else {
+                drivetrain.stop();
+            }
+            digitalWrite(Pins::LED, safe ? HIGH : ((millis() / 100) % 2));
+            if (phase_elapsed_ms >= Config::FORWARD_DURATION_MS) {
+                Serial.println(">> 10s écoulés - DEMI-TOUR");
+                current_phase    = Phase::UTURN;
+                phase_elapsed_ms = 0;
+            }
+            break;
+
+        case Phase::UTURN:
+            // Demi-tour sur place. On IGNORE l'obstacle.
+            drivetrain.turnInPlace(Config::SPEED_TURN);
+            phase_elapsed_ms += dt;
+            digitalWrite(Pins::LED, (millis() / 80) % 2);
+            if (phase_elapsed_ms >= Config::UTURN_DURATION_MS) {
+                Serial.println(">> Demi-tour fini - AVANCE 2");
+                drivetrain.stop();
+                current_phase    = Phase::FORWARD_2;
+                phase_elapsed_ms = 0;
+            }
+            break;
+
+        case Phase::FORWARD_2:
+            if (safe) {
+                drivetrain.drive(Config::SPEED_CRUISE);
+                phase_elapsed_ms += dt;
+            } else {
+                drivetrain.stop();
+            }
+            digitalWrite(Pins::LED, safe ? HIGH : ((millis() / 100) % 2));
+            if (phase_elapsed_ms >= Config::FORWARD_DURATION_MS) {
+                Serial.println(">> Terminé - STOP");
+                current_phase = Phase::DONE;
+            }
+            break;
+
+        case Phase::DONE:
+            drivetrain.stop();
+            digitalWrite(Pins::LED, LOW);
+            break;
+    }
+
+    // ===== Log périodique =====
+    if (now - t_last_print >= Config::PRINT_PERIOD_MS) {
+        t_last_print = now;
+        Serial.printf("[%s] elapsed=%lu ms | dist=%ld cm | blocked=%d | starter=%s\n",
+                      phaseName(current_phase),
+                      phase_elapsed_ms,
+                      dist,
+                      (int)blocked,
+                      starterReleased() ? "OUT" : "IN");
     }
 
     delay(Config::LOOP_PERIOD_MS);

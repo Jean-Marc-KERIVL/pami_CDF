@@ -24,4 +24,5 @@ long UltrasonicSensor::readCm() {
 
     // Vitesse du son ≈ 343 m/s -> 0.0343 cm/µs, aller-retour donc /2
     return static_cast<long>(duration * 0.0343f / 2.0f);
+    
 }
