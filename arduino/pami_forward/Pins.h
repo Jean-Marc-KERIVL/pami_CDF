@@ -53,6 +53,11 @@ namespace Config {
     constexpr unsigned long FORWARD_DURATION_MS  = 10000UL;   // 10 s
     constexpr unsigned long UTURN_DURATION_MS    = 1500UL;    // ~1.5 s, à calibrer
 
+    // Servo
+    constexpr unsigned long SERVO_TOGGLE_PERIOD_MS = 500UL;   // haut/bas toutes les 500 ms
+    constexpr int  SERVO_ANGLE_LOW  = 0;
+    constexpr int  SERVO_ANGLE_HIGH = 180;
+
     // Boucle principale
     constexpr unsigned long LOOP_PERIOD_MS       = 30;
     constexpr unsigned long SERIAL_BAUD          = 115200;
